@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asistente de Voz Gemini - Simulación</title>
+    <title>Asistente de Voz Gemini con TTS</title>
     <!-- Carga de Tailwind CSS para un diseño moderno y responsive -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -36,7 +36,6 @@
         }
     </style>
     <script>
-        // Configuración de colores de Tailwind
         tailwind.config = {
             theme: {
                 extend: {
@@ -69,16 +68,27 @@
             <!-- Área de Respuesta -->
             <div id="responseContainer" class="p-4 card rounded-lg min-h-[100px] flex flex-col justify-center">
                 <p id="responseText" class="text-sm italic text-gray-400">La respuesta del Asistente aparecerá aquí.</p>
+                
                 <div id="loadingIndicator" class="hidden flex justify-center items-center py-4">
                     <div class="loading-dot"></div>
                     <div class="loading-dot"></div>
                     <div class="loading-dot"></div>
                 </div>
+
+                <!-- Controles TTS -->
+                <div id="ttsControls" class="mt-3 hidden flex justify-between items-center">
+                    <span id="ttsStatus" class="text-xs text-gray-500"></span>
+                    <button id="ttsButton" class="bg-primary/20 text-primary hover:bg-primary/30 py-1 px-3 rounded-lg text-sm font-semibold transition duration-200 flex items-center disabled:opacity-50">
+                        <!-- Icono de altavoz (Lucide) -->
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM12 4.5a.75.75 0 0 1 .75.75v14.5a.75.75 0 0 1-1.5 0V5.25a.75.75 0 0 1 .75-.75zM8.464 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM4.929 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75zM19.071 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75z"></path></svg>
+                        Leer Respuesta
+                    </button>
+                </div>
             </div>
 
-            <!-- Área de Debugging y Errores (Muestra el 403 si falla después de reintentos) -->
+            <!-- Área de Debugging y Errores -->
             <div id="debugArea" class="mt-4 p-3 bg-danger/20 border border-danger rounded-lg text-xs hidden">
-                <h3 class="font-bold text-danger mb-1">Error del Sistema (403/429):</h3>
+                <h3 class="font-bold text-danger mb-1">Error:</h3>
                 <p id="errorMessage" class="text-danger"></p>
             </div>
 
@@ -86,10 +96,12 @@
     </div>
 
     <script>
-        // La clave de API se deja vacía; el entorno de Canvas la inyectará automáticamente en tiempo de ejecución.
+        // URLs y Configuración de la API
         const API_KEY = ""; 
-        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
-        const MAX_RETRIES = 5; // Número máximo de reintentos
+        const TEXT_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
+        const TTS_VOICE = "Kore"; // Voz firme y clara para el asistente
+        const MAX_RETRIES = 5; 
         
         // Elementos del DOM
         const userInput = document.getElementById('userInput');
@@ -98,18 +110,98 @@
         const loadingIndicator = document.getElementById('loadingIndicator');
         const debugArea = document.getElementById('debugArea');
         const errorMessage = document.getElementById('errorMessage');
+        const ttsControls = document.getElementById('ttsControls');
+        const ttsButton = document.getElementById('ttsButton');
+        const ttsStatus = document.getElementById('ttsStatus');
+
+        // --- Funciones de Utilidad para Audio (PCM a WAV) ---
 
         /**
-         * Actualiza la interfaz de usuario con el estado actual (loading, ready, error).
-         * @param {string} state - 'loading', 'ready', 'error', o 'initial'.
-         * @param {string} content - Contenido de la respuesta o mensaje de error.
+         * Convierte una cadena base64 en un ArrayBuffer.
+         * @param {string} base64 - Cadena base64 de datos de audio.
+         * @returns {ArrayBuffer}
+         */
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        /**
+         * Crea el encabezado WAV y convierte los datos PCM en un Blob WAV.
+         * La API devuelve PCM de 16 bits firmado.
+         * @param {Int16Array} pcm16 - Datos de audio PCM (16-bit, signed).
+         * @param {number} sampleRate - Tasa de muestreo (ej: 24000).
+         * @returns {Blob} El Blob de audio WAV.
+         */
+        function pcmToWav(pcm16, sampleRate) {
+            const numChannels = 1;
+            const bitDepth = 16;
+            const blockAlign = numChannels * (bitDepth / 8);
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = pcm16.length * 2; // 2 bytes por Int16
+
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            let offset = 0;
+            const writeString = (str) => {
+                for (let i = 0; i < str.length; i++) {
+                    view.setUint8(offset++, str.charCodeAt(i));
+                }
+            };
+            const writeUint32 = (val) => { view.setUint32(offset, val, true); offset += 4; };
+            const writeUint16 = (val) => { view.setUint16(offset, val, true); offset += 2; };
+
+            // RIFF chunk
+            writeString('RIFF');
+            writeUint32(36 + dataSize); // ChunkSize
+            writeString('WAVE');
+
+            // fmt chunk
+            writeString('fmt ');
+            writeUint32(16);          // Subchunk1Size (16 for PCM)
+            writeUint16(1);           // AudioFormat (1 for PCM)
+            writeUint16(numChannels); // NumChannels
+            writeUint32(sampleRate);  // SampleRate
+            writeUint32(byteRate);    // ByteRate
+            writeUint16(blockAlign);  // BlockAlign
+            writeUint16(bitDepth);    // BitsPerSample
+
+            // data chunk
+            writeString('data');
+            writeUint32(dataSize);    // Subchunk2Size
+
+            // Escribir datos PCM (Int16 a bytes)
+            for (let i = 0; i < pcm16.length; i++) {
+                view.setInt16(offset, pcm16[i], true); // true = little-endian
+                offset += 2;
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+
+        // --- Lógica Principal del Asistente ---
+
+        /**
+         * Actualiza la interfaz de usuario con el estado actual.
          */
         function updateUI(state, content = '') {
             sendButton.disabled = state === 'loading';
             sendButton.textContent = state === 'loading' ? 'Procesando...' : 'Enviar Consulta';
-            loadingIndicator.classList.toggle('hidden', state !== 'loading');
+            loadingIndicator.classList.toggle('hidden', state === 'loading');
             
-            // Limpiar estilos y errores
+            // Gestionar la visibilidad de los controles TTS
+            ttsControls.classList.toggle('hidden', state !== 'ready');
+            ttsButton.disabled = state !== 'ready';
+            ttsStatus.textContent = ''; // Limpiar estado TTS
+
+            // Limpiar errores
             debugArea.classList.add('hidden');
             errorMessage.textContent = '';
             responseText.classList.remove('text-danger', 'text-sm', 'italic');
@@ -117,10 +209,11 @@
             
             if (state === 'ready') {
                 responseText.innerHTML = content;
+                ttsButton.innerHTML = `<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM12 4.5a.75.75 0 0 1 .75.75v14.5a.75.75 0 0 1-1.5 0V5.25a.75.75 0 0 1 .75-.75zM8.464 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM4.929 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75zM19.071 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75z"></path></svg> Leer Respuesta`;
             } else if (state === 'error') {
                 debugArea.classList.remove('hidden');
                 errorMessage.textContent = content;
-                responseText.textContent = 'Lo siento, no pude procesar tu solicitud. Revisa el error detallado abajo.';
+                responseText.textContent = 'Lo siento, no pude procesar tu solicitud.';
                 responseText.classList.add('text-danger');
             } else if (state === 'initial') {
                 responseText.textContent = 'La respuesta del Asistente aparecerá aquí.';
@@ -130,7 +223,7 @@
         }
 
         /**
-         * Realiza la llamada a la API de Gemini con manejo de reintentos exponenciales.
+         * Llama a la API de generación de texto (Gemini) con reintentos.
          */
         async function handleQuery() {
             const userQuery = userInput.value.trim();
@@ -138,31 +231,33 @@
                 updateUI('error', 'Por favor, introduce una pregunta.');
                 return;
             }
+            
+            // Diagnóstico Crítico de Clave
+            if (!API_KEY) {
+                updateUI('error', 'Error 403 de Configuración: La clave de API (API_KEY) no está disponible. Este es un problema de inicialización del entorno que debe ser resuelto por el sistema.');
+                return;
+            }
 
             updateUI('loading');
 
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
-                // Habilitamos Google Search para grounding (respuestas actuales)
                 tools: [{ "google_search": {} }], 
                 systemInstruction: {
-                    parts: [{ text: "Actúa como un asistente de voz amigable y conciso, respondiendo en español. Prioriza la precisión y la información actual." }]
+                    parts: [{ text: "Actúa como un asistente de voz amigable y conciso, respondiendo en español. Elimina el formato markdown y responde solo con texto plano para facilitar la lectura de voz." }]
                 },
             };
             
-            const apiUrlWithKey = `${API_URL}?key=${API_KEY}`;
-
+            const apiUrlWithKey = `${TEXT_API_URL}?key=${API_KEY}`;
             let response = null;
             let lastError = null;
 
-            // --- LÓGICA DE REINTENTO EXPONENCIAL (SOLUCIÓN AL ERROR 403/429) ---
+            // Lógica de Reintento Exponencial (maneja 403 y 429)
             for (let i = 0; i < MAX_RETRIES; i++) {
                 try {
-                    // Esperar antes de cada reintento (a partir del segundo intento)
                     if (i > 0) {
-                        const delay = Math.pow(2, i) * 1000; // Retraso: 2s, 4s, 8s, 16s...
+                        const delay = Math.pow(2, i) * 1000; 
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        console.log(`Reintento ${i + 1} después de ${delay / 1000}s...`);
                     }
 
                     const fetchResponse = await fetch(apiUrlWithKey, {
@@ -171,51 +266,41 @@
                         body: JSON.stringify(payload)
                     });
                     
-                    // Leemos el cuerpo de la respuesta, incluso si es un error HTTP
                     response = await fetchResponse.json();
 
-                    // Si la respuesta es OK (200-299), el problema se ha resuelto. Salimos del bucle
                     if (fetchResponse.ok) {
                         break;
                     } 
                     
-                    // Si es un error reintentable (403, 429), guardamos el error y continuamos el bucle
                     if (fetchResponse.status === 403 || fetchResponse.status === 429) {
-                        lastError = `Error HTTP ${fetchResponse.status}. Mensaje: ${response.error?.message || 'Error desconocido de API. (Reintentando...)'}`;
-                        console.error(`Error transitorio.`, lastError);
+                        lastError = `Error HTTP ${fetchResponse.status} (Reintentando...): ${response.error?.message || 'Error de API desconocido.'}`;
                     } else {
-                        // Para cualquier otro error (ej: 400 Bad Request), es un error fatal. Lanzamos para salir.
-                        lastError = `Error HTTP ${fetchResponse.status}. Mensaje: ${response.error?.message || 'Error desconocido de API. (Fallo fatal)'}`;
+                        lastError = `Error HTTP ${fetchResponse.status} (Fallo fatal): ${response.error?.message || 'Error de API desconocido.'}`;
                         throw new Error(lastError); 
                     }
 
                 } catch (error) {
-                    // Esto atrapa errores de red o errores fatales lanzados internamente
                     lastError = `Fallo en la conexión o error fatal: ${error.message}`;
-                    console.error('Error de red/fetch.', lastError);
                 }
 
                 if (i === MAX_RETRIES - 1) {
-                    // Si hemos agotado los reintentos
                     updateUI('error', `Error Final después de ${MAX_RETRIES} intentos: ${lastError}`);
                     return;
                 }
             }
-            // --- FIN LÓGICA DE REINTENTO ---
 
-            // 2. Procesamiento de la respuesta
-            if (!response || !response.candidates || response.candidates.length === 0) {
-                updateUI('error', 'Error: La API no devolvió una respuesta válida.');
-                return;
-            }
-
-            const candidate = response.candidates[0];
-            let generatedText = candidate.content?.parts?.[0]?.text || "No se pudo generar una respuesta.";
+            // 3. Procesamiento y Renderización de la respuesta
+            const candidate = response.candidates?.[0];
+            let generatedText = candidate?.content?.parts?.[0]?.text || "No se pudo generar una respuesta.";
             
-            // 3. Extracción de citaciones
+            // Limpiar texto para una buena lectura (quitar Markdown)
+            const cleanText = generatedText.replace(/[\*\_\#]/g, '').trim(); 
+            ttsButton.setAttribute('data-text', cleanText); // Guardar el texto limpio para la voz
+
+            // Extracción de citaciones
             let sourcesHTML = '';
-            const groundingMetadata = candidate.groundingMetadata;
-            if (groundingMetadata && groundingMetadata.groundingAttributions) {
+            const groundingMetadata = candidate?.groundingMetadata;
+            if (groundingMetadata?.groundingAttributions) {
                 const sources = groundingMetadata.groundingAttributions
                     .map(attr => ({
                         uri: attr.web?.uri,
@@ -231,21 +316,100 @@
                 }
             }
 
-            // 4. Mostrar el resultado
             updateUI('ready', generatedText + sourcesHTML);
         }
+
+        /**
+         * Llama a la API de TTS y reproduce el audio.
+         * @param {string} textToSpeak - El texto a convertir a voz.
+         */
+        async function speakText(textToSpeak) {
+            ttsButton.disabled = true;
+            ttsStatus.textContent = 'Generando audio...';
+            ttsButton.innerHTML = '<span class="animate-spin mr-1">🎧</span> Cargando...';
+
+            const ttsPayload = {
+                contents: [{ parts: [{ text: textToSpeak }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: TTS_VOICE }
+                        },
+                        languageCode: "es-US" // For Spanish TTS
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+            
+            const apiUrlWithKey = `${TTS_API_URL}?key=${API_KEY}`;
+
+            try {
+                const response = await fetch(apiUrlWithKey, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(ttsPayload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Fallo HTTP: ${response.status}`);
+                }
+
+                const result = await response.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
+                    // Extraer sample rate del mimetype (ej: audio/L16;rate=24000)
+                    const match = mimeType.match(/rate=(\d+)/);
+                    const sampleRate = match ? parseInt(match[1], 10) : 24000; 
+
+                    ttsStatus.textContent = 'Reproduciendo...';
+                    
+                    const pcmData = base64ToArrayBuffer(audioData);
+                    // Los datos son PCM 16-bit signed
+                    const pcm16 = new Int16Array(pcmData); 
+                    
+                    const wavBlob = pcmToWav(pcm16, sampleRate);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+                    
+                    const audio = new Audio(audioUrl);
+                    audio.play();
+
+                    audio.onended = () => {
+                        ttsStatus.textContent = 'Reproducción finalizada.';
+                        ttsButton.disabled = false;
+                        ttsButton.innerHTML = '<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM12 4.5a.75.75 0 0 1 .75.75v14.5a.75.75 0 0 1-1.5 0V5.25a.75.75 0 0 1 .75-.75zM8.464 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM4.929 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75zM19.071 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75z"></path></svg> Leer Respuesta';
+                    };
+                } else {
+                    throw new Error('No se recibió audio válido.');
+                }
+            } catch (error) {
+                console.error("Error TTS:", error);
+                ttsStatus.textContent = 'Error al generar voz.';
+                ttsButton.disabled = false;
+                ttsButton.innerHTML = '<svg class="w-4 h-4 mr-1 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM12 4.5a.75.75 0 0 1 .75.75v14.5a.75.75 0 0 1-1.5 0V5.25a.75.75 0 0 1 .75-.75zM8.464 8.464a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75zM4.929 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75zM19.071 12a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 .75-.75z"></path></svg> Error Voz';
+            }
+        }
+
 
         // Inicializar la UI y adjuntar eventos
         window.onload = () => {
             updateUI('initial');
             sendButton.addEventListener('click', handleQuery);
+            ttsButton.addEventListener('click', () => {
+                const text = ttsButton.getAttribute('data-text');
+                if (text) {
+                    speakText(text);
+                }
+            });
             userInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleQuery();
                 }
             });
-            // Valor de prueba
             userInput.value = "¿Qué es una dirección IP y para qué sirve?"; 
         };
     </script>
