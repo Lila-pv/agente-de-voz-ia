@@ -107,12 +107,15 @@
 
             const base64ToArrayBuffer = (base64) => {
                 const binaryString = atob(base64);
-                const len = binaryString.length;
-                const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                return bytes.buffer;
+                // --- CONFIGURACIÓN DE LAS APIS Y GLOBALES ---
+const GEMINI_TEXT_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent';
+const GEMINI_TTS_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent';
+// Intentamos usar el token de autenticación inicial como un ID de consumidor si la API Key falla.
+// En este entorno, la API Key es la forma preferida de autenticación.
+const apiKey = ""; 
+// const firebaseAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+// Nota: La autenticación 403 suele ser por la apiKey, no por el auth token.
+// Dejamos la apiKey vacía para que el entorno la inyecte.
             };
 
             const pcmToWav = (pcmData, sampleRate) => {
@@ -338,16 +341,12 @@
                 safetyIcon.className = `text-${indicatorClass.split(' ')[1].split('-')[1]}-500`;
 
                 // Actualizar botón de envío
-                const isBlocked = status === 'blocked';
-                sendButton.disabled = isLoading || isBlocked;
-                promptInput.disabled = isLoading;
-                
-                if (isBlocked) {
-                    sendButton.className = sendButton.className.replace('bg-indigo-600 hover:bg-indigo-700 text-white', 'bg-gray-400 cursor-not-allowed');
-                } else {
-                    sendButton.className = sendButton.className.replace('bg-gray-400 cursor-not-allowed', 'bg-indigo-600 hover:bg-indigo-700 text-white');
-                }
-            };
+                const textPayload = {
+                        contents: historyForApi,
+                        systemInstruction: {
+                            parts: [{ text: systemInstruction }]
+                        }
+                    };
             
             // --- LÓGICA PRINCIPAL DEL CHAT ---
 
