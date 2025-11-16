@@ -3,16 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asistente de Texto Gemini</title>
+    <title>Asistente de Voz y Texto Gemini</title>
     <!-- Incluyendo Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f7f9fb;
         }
-        /* Estilos de la burbuja del asistente */
+        /* Estilos de burbuja */
         .assistant-bubble {
             background-color: #e0f2f1; /* Teal 50 */
             border-radius: 1.5rem 1.5rem 1.5rem 0.5rem;
@@ -21,7 +22,6 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
             line-height: 1.6;
         }
-        /* Estilos de la burbuja del usuario */
         .user-bubble {
             background-color: #3b82f6; /* Blue 500 */
             color: white;
@@ -31,19 +31,24 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             line-height: 1.6;
         }
-        /* Estilos para el indicador de carga */
+        /* Animación de carga (puntos) */
         .loading-dot {
             animation: bounce 0.6s infinite alternate;
         }
-        .loading-dot:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-        .loading-dot:nth-child(3) {
-            animation-delay: 0.4s;
-        }
+        .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.4s; }
         @keyframes bounce {
             from { transform: translateY(0); }
             to { transform: translateY(-8px); }
+        }
+        /* Animación de escucha (micrófono) */
+        .is-listening {
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(20, 184, 166, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
         }
     </style>
 </head>
@@ -53,8 +58,8 @@
 
         <!-- Encabezado -->
         <header class="p-4 border-b border-gray-100 bg-teal-600 rounded-t-xl">
-            <h1 class="text-xl font-bold text-white">Asistente de Texto Gemini</h1>
-            <p class="text-sm text-teal-200">Pregúntale cualquier cosa. Usa Google Search para la información más reciente.</p>
+            <h1 class="text-xl font-bold text-white">Asistente de Voz y Texto</h1>
+            <p class="text-sm text-teal-200">Escribe o habla tu consulta. La respuesta se leerá en voz alta.</p>
         </header>
 
         <!-- Área de Conversación -->
@@ -62,16 +67,17 @@
             <!-- Mensaje de Bienvenida -->
             <div class="flex justify-start">
                 <div class="assistant-bubble">
-                    Hola! Soy tu asistente. ¿En qué puedo ayudarte hoy?
+                    Hola! Soy tu asistente. ¡Puedes hablarme o escribirme!
                 </div>
             </div>
             <!-- Los mensajes se añadirán aquí -->
         </main>
 
-        <!-- Indicador de Carga -->
-        <div id="loading-indicator" class="p-3 flex justify-start items-center space-x-2 hidden">
-            <span class="text-sm text-gray-500">Escribiendo...</span>
-            <div class="flex space-x-1">
+        <!-- Indicador de Carga/Estado -->
+        <div id="status-indicator" class="p-3 flex justify-start items-center space-x-3 hidden">
+            <i id="status-icon" class="fas fa-magic text-teal-500"></i>
+            <span id="status-text" class="text-sm text-gray-500">Generando respuesta...</span>
+            <div id="loading-dots" class="flex space-x-1">
                 <div class="w-2 h-2 bg-teal-500 rounded-full loading-dot"></div>
                 <div class="w-2 h-2 bg-teal-500 rounded-full loading-dot"></div>
                 <div class="w-2 h-2 bg-teal-500 rounded-full loading-dot"></div>
@@ -80,87 +86,324 @@
 
         <!-- Área de Entrada -->
         <footer class="p-4 border-t border-gray-100 bg-gray-50 rounded-b-xl">
-            <div class="flex space-x-3">
+            <div class="flex space-x-3 items-center">
                 <input
                     type="text"
                     id="user-input"
                     class="flex-grow p-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition duration-150"
-                    placeholder="Escribe tu consulta aquí..."
+                    placeholder="Escribe o presiona el micrófono..."
                     onkeypress="if(event.key === 'Enter') handleQuery()"
                 >
                 <button
+                    id="mic-button"
+                    onclick="toggleSpeechInput()"
+                    class="p-3 bg-red-500 text-white rounded-full hover:bg-red-600 transition duration-150 shadow-md"
+                    title="Hablar (Speech-to-Text)"
+                >
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button
                     id="send-button"
                     onclick="handleQuery()"
-                    class="px-6 py-3 bg-teal-600 text-white font-semibold rounded-full hover:bg-teal-700 transition duration-150 shadow-md hover:shadow-lg disabled:opacity-50"
+                    class="px-5 py-3 bg-teal-600 text-white font-semibold rounded-full hover:bg-teal-700 transition duration-150 shadow-md disabled:opacity-50"
+                    title="Enviar consulta"
                 >
-                    Enviar
+                    <i class="fas fa-paper-plane"></i>
                 </button>
             </div>
         </footer>
-
     </div>
 
     <script>
-        // Global variables for API and UI elements
-        const API_MODEL = 'gemini-2.5-flash-preview-09-2025';
+        // --- CONSTANTES Y CONFIGURACIÓN ---
+        const GEMINI_API_MODEL = 'gemini-2.5-flash-preview-09-2025';
+        const TTS_API_MODEL = 'gemini-2.5-flash-preview-tts';
         const apiKey = ""; // Canvas environment will inject the API key
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent?key=${apiKey}`;
+        
+        // URLs de la API
+        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_API_MODEL}:generateContent?key=${apiKey}`;
+        const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${TTS_API_MODEL}:generateContent?key=${apiKey}`;
 
+        // Elementos UI
         const chatWindow = document.getElementById('chat-window');
         const userInput = document.getElementById('user-input');
         const sendButton = document.getElementById('send-button');
-        const loadingIndicator = document.getElementById('loading-indicator');
+        const micButton = document.getElementById('mic-button');
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const statusIcon = document.getElementById('status-icon');
+        const loadingDots = document.getElementById('loading-dots');
+
+        // Estado
+        let isListening = false;
+        let recognition = null;
+        let audioContext = null;
+
+        // --- FUNCIONES DE UTILIDAD (PCM a WAV) ---
+        
+        /** Convierte una cadena Base64 a un ArrayBuffer. */
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        /** Escribe una cadena en un DataView. */
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+        /** Escribe los datos PCM de 16 bits en el DataView. */
+        function floatTo16BitPCM(output, offset, input) {
+            for (let i = 0; i < input.length; i++, offset += 2) {
+                const s = Math.max(-1, Math.min(1, input[i]));
+                output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+        }
+
+        /** Escribe los encabezados WAV. */
+        function writeHeaders(view, sampleRate, numberOfChannels, bytesPerSample, dataLength) {
+            // RIFF chunk descriptor
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true); // Total size
+            writeString(view, 8, 'WAVE');
+
+            // fmt sub-chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true); // Sub-chunk size (16 for PCM)
+            view.setUint16(20, 1, true); // Audio format (1 for PCM)
+            view.setUint16(22, numberOfChannels, true); // Number of channels
+            view.setUint32(24, sampleRate, true); // Sample rate
+            view.setUint32(28, sampleRate * numberOfChannels * bytesPerSample, true); // Byte rate
+            view.setUint16(32, numberOfChannels * bytesPerSample, true); // Block align
+            view.setUint16(34, bytesPerSample * 8, true); // Bits per sample
+
+            // data sub-chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataLength, true); // Data size
+        }
+
+        /** Convierte datos PCM (Int16Array) a un Blob WAV. */
+        function pcmToWav(pcm16, sampleRate) {
+            const numberOfChannels = 1;
+            const bytesPerSample = 2; // 16-bit PCM
+
+            const dataLength = pcm16.length * bytesPerSample;
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+
+            writeHeaders(view, sampleRate, numberOfChannels, bytesPerSample, dataLength);
+
+            // Copy PCM data
+            const pcm8 = new Uint8Array(pcm16.buffer);
+            const dataOffset = 44;
+            for (let i = 0; i < pcm8.length; i++) {
+                view.setUint8(dataOffset + i, pcm8[i]);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+
+        // --- FUNCIONES DE UI Y CHAT ---
+
+        /** Actualiza el estado de la UI (botones, indicador de carga). */
+        function setUIState(isDisabled, status = '', icon = '', showDots = true) {
+            userInput.disabled = isDisabled;
+            sendButton.disabled = isDisabled;
+            micButton.disabled = isDisabled;
+
+            if (status) {
+                statusIndicator.classList.remove('hidden');
+                statusText.textContent = status;
+                statusIcon.className = `text-teal-500 ${icon}`;
+                loadingDots.classList.toggle('hidden', !showDots);
+            } else {
+                statusIndicator.classList.add('hidden');
+            }
+        }
 
         /**
-         * Adds a new message to the chat window and scrolls to the bottom.
-         * @param {string} text - The content of the message.
-         * @param {string} sender - 'user' or 'assistant'.
-         * @param {Array<Object>} sources - Array of grounding sources.
+         * Añade un nuevo mensaje a la ventana de chat.
+         * @param {string} text - El contenido del mensaje.
+         * @param {string} sender - 'user' o 'assistant'.
          */
-        function updateChat(text, sender, sources = []) {
+        function updateChat(text, sender) {
             const messageContainer = document.createElement('div');
             messageContainer.className = sender === 'user' ? 'flex justify-end' : 'flex justify-start';
 
             const messageBubble = document.createElement('div');
-            messageBubble.className = sender === 'user' ? 'user-bubble' : 'assistant-bubble';
+            messageBubble.className = sender === 'user' ? 'user-bubble' : 'assistant-bubble relative';
 
-            // Convert markdown text to HTML for links and basic formatting
+            // Conversión básica de Markdown a HTML (negrita y saltos de línea)
             let htmlText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
             htmlText = htmlText.replace(/\n/g, '<br>');
 
             messageBubble.innerHTML = htmlText;
 
-            // Add sources if available and from the assistant
-            if (sender === 'assistant' && sources.length > 0) {
-                const sourceList = document.createElement('div');
-                sourceList.className = 'mt-3 pt-2 border-t border-gray-200 text-xs text-gray-600';
-                sourceList.innerHTML = '<strong>Fuentes:</strong>';
-                const ul = document.createElement('ul');
-                ul.className = 'list-disc ml-4 mt-1 space-y-0.5';
-
-                sources.slice(0, 3).forEach((source, index) => { // Limit to 3 sources
-                    if (source.uri && source.title) {
-                        const li = document.createElement('li');
-                        li.innerHTML = `<a href="${source.uri}" target="_blank" class="text-teal-700 hover:text-teal-900 transition duration-150 truncate block">${source.title}</a>`;
-                        ul.appendChild(li);
-                    }
-                });
-                sourceList.appendChild(ul);
-                messageBubble.appendChild(sourceList);
+            // Añadir icono de audio para el asistente
+            if (sender === 'assistant') {
+                const audioIcon = document.createElement('i');
+                audioIcon.className = 'fas fa-volume-up text-teal-700 ml-2 cursor-pointer transition duration-150 hover:text-teal-900 absolute -right-5 top-1';
+                audioIcon.title = 'Escuchar respuesta';
+                audioIcon.onclick = () => speakResponse(text);
+                messageBubble.appendChild(audioIcon);
             }
 
             messageContainer.appendChild(messageBubble);
             chatWindow.appendChild(messageContainer);
 
-            // Scroll to the latest message
+            // Desplazarse al último mensaje
             chatWindow.scrollTop = chatWindow.scrollHeight;
+            return messageBubble;
         }
 
+        // --- FUNCIONES DE VOZ (TTS y STT) ---
+        
         /**
-         * Calls the Gemini API with exponential backoff.
-         * @param {string} userQuery - The user's prompt.
-         * @param {number} attempt - Current retry attempt.
-         * @returns {Promise<Object>} The API response result object.
+         * Llama a la API de Gemini para generar el audio TTS y lo reproduce.
+         * @param {string} text - El texto a convertir a voz.
+         */
+        async function speakResponse(text) {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            setUIState(true, 'Generando voz...', 'fas fa-volume-up', true);
+
+            const ttsPayload = {
+                contents: [{ parts: [{ text: text }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: "Kore" } // Voz en español con tono firme
+                        }
+                    }
+                },
+            };
+
+            try {
+                const response = await fetch(ttsApiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(ttsPayload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`TTS API error: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
+                    const match = mimeType.match(/rate=(\d+)/);
+                    const sampleRate = match ? parseInt(match[1], 10) : 24000; // Asumir 24kHz si no se especifica
+
+                    const pcmData = base64ToArrayBuffer(audioData);
+                    // API returns signed PCM16 audio data.
+                    const pcm16 = new Int16Array(pcmData);
+                    const wavBlob = pcmToWav(pcm16, sampleRate);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+
+                    // Reproducir audio
+                    const audio = new Audio(audioUrl);
+                    audio.play().catch(e => console.error("Error de reproducción de audio:", e));
+                    
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        setUIState(false);
+                    };
+
+                } else {
+                    throw new Error("Respuesta de audio TTS incompleta o formato incorrecto.");
+                }
+
+            } catch (error) {
+                console.error("Error al generar o reproducir TTS:", error);
+                alert("Error al generar la voz: " + error.message);
+                setUIState(false);
+            } finally {
+                setUIState(false);
+            }
+        }
+
+        /** Inicia o detiene el reconocimiento de voz. */
+        function toggleSpeechInput() {
+            if (!('webkitSpeechRecognition' in window)) {
+                alert("Tu navegador no soporta el reconocimiento de voz (Speech Recognition).");
+                return;
+            }
+
+            if (!recognition) {
+                recognition = new webkitSpeechRecognition();
+                recognition.continuous = false;
+                recognition.lang = 'es-ES'; // Configurar idioma español
+                recognition.interimResults = false;
+            }
+
+            if (isListening) {
+                recognition.stop();
+                setUIState(false);
+                micButton.classList.remove('is-listening');
+                micButton.classList.remove('bg-red-700');
+                micButton.classList.add('bg-red-500');
+                isListening = false;
+                return;
+            }
+            
+            // Iniciar escucha
+            recognition.start();
+            isListening = true;
+            micButton.classList.add('is-listening');
+            micButton.classList.remove('bg-red-500');
+            micButton.classList.add('bg-red-700');
+            setUIState(true, 'Escuchando...', 'fas fa-microphone', false);
+            userInput.value = ''; // Limpiar entrada mientras escucha
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                userInput.value = transcript;
+                recognition.stop();
+            };
+
+            recognition.onend = () => {
+                if (isListening) {
+                    isListening = false;
+                    micButton.classList.remove('is-listening');
+                    micButton.classList.remove('bg-red-700');
+                    micButton.classList.add('bg-red-500');
+                    setUIState(false);
+                    if (userInput.value.trim()) {
+                        handleQuery();
+                    }
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Error de reconocimiento de voz:', event.error);
+                recognition.stop();
+                alert('Error en la entrada de voz: ' + event.error);
+            };
+        }
+
+
+        // --- FUNCIONES DE API Y LÓGICA PRINCIPAL ---
+
+        /**
+         * Llama a la API de Gemini con retroceso exponencial.
+         * @param {string} userQuery - El prompt del usuario.
+         * @param {number} attempt - Intento de reintento actual.
+         * @returns {Promise<Object>} El objeto de resultado de la respuesta de la API.
          */
         async function fetchWithBackoff(userQuery, attempt = 0) {
             const MAX_RETRIES = 5;
@@ -168,99 +411,89 @@
 
             const payload = {
                 contents: [{ parts: [{ text: userQuery }] }],
-                // Enable Google Search for grounded responses
+                // Habilitar Google Search para respuestas fundamentadas
                 tools: [{ "google_search": {} }],
                 systemInstruction: {
-                    parts: [{ text: "Actúa como un asistente amigable y profesional. Responde a las preguntas de manera informativa y concisa, utilizando siempre el contexto proporcionado por Google Search cuando sea relevante." }]
+                    parts: [{ text: "Actúa como un asistente profesional y conciso. Responde a las preguntas en español. Siempre utiliza la información más reciente de Google Search para fundamentar tus respuestas." }]
                 },
             };
 
             try {
-                const response = await fetch(apiUrl, {
+                const response = await fetch(geminiApiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
-                if (response.status === 429 && attempt < MAX_RETRIES) {
-                    const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 1000;
-                    // Exponential backoff retry logic - no logging of retries as per instructions
+                if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+                    const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 500;
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchWithBackoff(userQuery, attempt + 1);
                 }
 
                 if (!response.ok) {
-                    throw new Error(`API error: ${response.statusText}`);
+                    // Intentar leer el cuerpo del error si es posible
+                    const errorDetails = await response.text();
+                    console.error("Respuesta de error completa de la API:", errorDetails);
+                    throw new Error(`Error de API: ${response.status} ${response.statusText}. Detalles: ${errorDetails.substring(0, 100)}...`);
                 }
 
                 return await response.json();
 
             } catch (error) {
                 if (attempt < MAX_RETRIES) {
-                    const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 1000;
-                    // Exponential backoff retry logic - no logging of retries as per instructions
+                    const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 500;
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchWithBackoff(userQuery, attempt + 1);
                 }
                 console.error("Error final después de múltiples reintentos:", error);
-                throw new Error("Lo siento, no pude comunicarme con el asistente. Inténtalo de nuevo.");
+                throw new Error(`Lo siento, no pude comunicarme con el servidor después de ${MAX_RETRIES} intentos.`);
             }
         }
 
-        /**
-         * Main handler for user queries.
-         */
+        /** Main handler for user queries. */
         async function handleQuery() {
             const prompt = userInput.value.trim();
             if (!prompt) return;
 
-            // 1. Clear input and disable UI
+            // 1. Limpiar entrada y deshabilitar UI
             userInput.value = '';
-            userInput.disabled = true;
-            sendButton.disabled = true;
-            loadingIndicator.classList.remove('hidden');
+            setUIState(true, 'Generando respuesta...', 'fas fa-brain', true);
 
-            // 2. Add user message to chat
+            // 2. Añadir mensaje del usuario al chat
             updateChat(prompt, 'user');
 
             try {
-                // 3. Call the API
+                // 3. Llamar a la API de Gemini
                 const result = await fetchWithBackoff(prompt);
                 const candidate = result.candidates?.[0];
 
                 let assistantResponse = "Lo siento, hubo un problema al generar la respuesta.";
-                let sources = [];
 
                 if (candidate && candidate.content?.parts?.[0]?.text) {
                     assistantResponse = candidate.content.parts[0].text;
-
-                    // Extract grounding sources
-                    const groundingMetadata = candidate.groundingMetadata;
-                    if (groundingMetadata && groundingMetadata.groundingAttributions) {
-                        sources = groundingMetadata.groundingAttributions
-                            .map(attribution => ({
-                                uri: attribution.web?.uri,
-                                title: attribution.web?.title,
-                            }))
-                            .filter(source => source.uri && source.title);
-                    }
                 } else if (result.error) {
                     assistantResponse = `Error de API: ${result.error.message}`;
                     console.error("Error de la API:", result.error);
                 }
 
-                // 4. Add assistant response to chat
-                updateChat(assistantResponse, 'assistant', sources);
+                // 4. Añadir respuesta del asistente al chat
+                updateChat(assistantResponse, 'assistant');
+                
+                // 5. Generar y reproducir voz (TTS)
+                await speakResponse(assistantResponse);
 
             } catch (error) {
-                // 5. Handle critical errors
-                const errorMessage = error.message || "Ocurrió un error desconocido. Por favor, revisa la consola para más detalles.";
+                // 6. Manejar errores críticos
+                const errorMessage = error.message.includes("403") 
+                    ? `Error de Configuración (403): La clave de API no está disponible en este entorno. Por favor, reinicia el canvas para un nuevo intento.`
+                    : error.message || "Ocurrió un error desconocido. Por favor, revisa la consola para más detalles.";
+                    
                 updateChat(`**Error:** ${errorMessage}`, 'assistant');
+                console.error("Error en handleQuery:", error);
             } finally {
-                // 6. Re-enable UI
-                userInput.disabled = false;
-                sendButton.disabled = false;
-                loadingIndicator.classList.add('hidden');
+                // 7. Re-habilitar UI
+                setUIState(false);
                 userInput.focus();
             }
         }
