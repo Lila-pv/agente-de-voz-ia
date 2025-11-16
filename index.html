@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agente de Voz IA Seguro</title>
+    <!-- Incluimos Tailwind CSS para el estilizado -->
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script>
+      // Configuración de Tailwind para usar la fuente Inter y estilos modernos
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+          }
+        }
+      }
+    </script>
+    <!-- Incluimos React y ReactDOM desde CDN -->
+    <script src="[https://unpkg.com/react@18/umd/react.development.js](https://unpkg.com/react@18/umd/react.development.js)"></script>
+    <script src="[https://unpkg.com/react-dom@18/umd/react-dom.development.js](https://unpkg.com/react-dom@18/umd/react-dom.development.js)"></script>
+    <!-- Incluimos Babel para transformar JSX al vuelo (necesario en este formato) -->
+    <script src="[https://unpkg.com/@babel/standalone/babel.min.js](https://unpkg.com/@babel/standalone/babel.min.js)"></script>
+    <!-- Incluimos Lucide Icons para los iconos de la interfaz -->
+    <script src="[https://unpkg.com/lucide@latest](https://unpkg.com/lucide@latest)"></script>
+</head>
+<body class="bg-gray-50 antialiased min-h-screen">
+    <div id="root"></div>
+
+    <!-- Script principal de la aplicación React (type="text/babel" es CRUCIAL) -->
+    <script type="text/babel">
+        const { useState, useCallback, useRef, useEffect } = React;
+        const { Send, Volume2, Shield, Loader2, CheckCircle, AlertTriangle } = lucide;
+
+        // --- CONFIGURACIÓN DE LAS APIs ---
+        const GEMINI_TEXT_API_URL_BASE = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent)';
+        const GEMINI_TTS_API_URL_BASE = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent)';
+        const apiKey = ""; // La clave API será inyectada por el entorno de Canvas
+
+        // Función de utilidad para Base64 a ArrayBuffer (necesaria para el audio PCM)
+        const base64ToArrayBuffer = (base64) => {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        };
+
+        // Función para convertir PCM 16-bit a formato WAV reproducible
+        const pcmToWav = (pcmData, sampleRate) => {
+            const numChannels = 1;
+            const bytesPerSample = 2; // 16-bit PCM
+
+            const buffer = new ArrayBuffer(44 + pcmData.length * bytesPerSample);
+            const view = new DataView(buffer);
+
+            const writeString = (view, offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+
+            // RIFF identifier
+            writeString(view, 0, 'RIFF');
+            // File size (4 bytes)
+            view.setUint32(4, 36 + pcmData.length * bytesPerSample, true);
+            // WAV identifier
+            writeString(view, 8, 'WAVE');
+            // fmt sub-chunk identifier
+            writeString(view, 12, 'fmt ');
+            // fmt sub-chunk size (16 for PCM)
+            view.setUint32(16, 16, true);
+            // Audio format (1 for PCM)
+            view.setUint16(20, 1, true);
+            // Number of channels
+            view.setUint16(22, numChannels, true);
+            // Sample rate
+            view.setUint32(24, sampleRate, true);
+            // Byte rate (SampleRate * NumChannels * BytesPerSample)
+            view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+            // Block align (NumChannels * BytesPerSample)
+            view.setUint16(32, numChannels * bytesPerSample, true);
+            // Bits per sample (16)
+            view.setUint16(34, 16, true);
+            // data sub-chunk identifier
+            writeString(view, 36, 'data');
+            // data sub-chunk size
+            view.setUint32(40, pcmData.length * bytesPerSample, true);
+
+            // Write PCM data
+            let offset = 44;
+            for (let i = 0; i < pcmData.length; i++) {
+                view.setInt16(offset, pcmData[i], true);
+                offset += bytesPerSample;
+            }
+
+            return new Blob([buffer], { type: 'audio/wav' });
+        };
+
+        // Función para implementar la Retirada Exponencial (Exponential Backoff)
+        const fetchWithRetry = async (url, options, maxRetries = 5) => {
+            let lastError = null;
+            for (let i = 0; i < maxRetries; i++) {
+                const delay = Math.pow(2, i) * 1000;
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) {
+                        // Throw error if response status is not OK (e.g., 429 for rate limit)
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response;
+                } catch (error) {
+                    lastError = error;
+                    if (i < maxRetries - 1) {
+                        // Wait before retrying
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+            }
+            throw new Error(`Failed to fetch after ${maxRetries} retries. Last error: ${lastError.message}`);
+        };
+
+        // --- COMPONENTE PRINCIPAL (App) ---
+        function App() {
+            const [prompt, setPrompt] = useState('');
+            const [chatHistory, setChatHistory] = useState([]);
+            const [isLoading, setIsLoading] = useState(false);
+            const [safetyStatus, setSafetyStatus] = useState('safe'); // 'safe', 'warning', 'blocked'
+            const audioRef = useRef(null);
+            const chatEndRef = useRef(null);
+
+            // Hook para hacer scroll al final del chat
+            useEffect(() => {
+                chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }, [chatHistory]);
+
+            // Simulación del Guardrail de Seguridad
+            const checkSafety = useCallback((text) => {
+                const lowerText = text.toLowerCase();
+                
+                // Bloquea: Violencia, Ilegalidad, Hacking
+                if (lowerText.includes('violencia') || lowerText.includes('ilegal') || lowerText.includes('hacking') || lowerText.includes('exploit')) {
+                    setSafetyStatus('blocked');
+                    return false;
+                } 
+                
+                // Advierte: Política, Finanzas, Salud (temas sensibles)
+                if (lowerText.includes('política') || lowerText.includes('finanzas') || lowerText.includes('salud')) {
+                    setSafetyStatus('warning');
+                    return true; 
+                }
+
+                setSafetyStatus('safe');
+                return true;
+            }, []);
+
+            // Función para convertir la respuesta de texto a voz y reproducirla
+            const generateAndPlayAudio = useCallback(async (textToSpeak) => {
+                const ttsPayload = {
+                    contents: [{ parts: [{ text: textToSpeak }] }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: {
+                                prebuiltVoiceConfig: { voiceName: "Kore" } // Voz: Kore (Formal)
+                            }
+                        }
+                    },
+                    model: "gemini-2.5-flash-preview-tts"
+                };
+                
+                try {
+                    const ttsResponse = await fetchWithRetry(`${GEMINI_TTS_API_URL_BASE}?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(ttsPayload)
+                    });
+
+                    const ttsResult = await ttsResponse.json();
+                    const part = ttsResult?.candidates?.[0]?.content?.parts?.[0];
+                    const audioData = part?.inlineData?.data;
+                    const mimeType = part?.inlineData?.mimeType;
+
+                    if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                        // Extraer el sample rate (ej: audio/L16;rate=24000)
+                        const rateMatch = mimeType.match(/rate=(\d+)/);
+                        const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+                        
+                        const pcmData = base64ToArrayBuffer(audioData);
+                        const pcm16 = new Int16Array(pcmData);
+                        const wavBlob = pcmToWav(pcm16, sampleRate);
+                        const audioUrl = URL.createObjectURL(wavBlob);
+
+                        // Reproducir el audio
+                        if (audioRef.current) {
+                            audioRef.current.src = audioUrl;
+                            audioRef.current.play().catch(e => console.error("Error al reproducir audio:", e));
+                        }
+                    } else {
+                        console.error("TTS: No se pudo obtener la data de audio.");
+                    }
+
+                } catch (error) {
+                    console.error("Error en TTS:", error);
+                }
+            }, [apiKey]);
+
+            // Función para manejar el envío y la generación de contenido
+            const handleSend = async () => {
+                if (!prompt.trim() || isLoading) return;
+
+                const userMessage = prompt.trim();
+                const isSafe = checkSafety(userMessage);
+
+                // 1. Añadir mensaje de usuario al historial
+                setChatHistory(prev => [...prev, { role: 'user', text: userMessage, status: isSafe ? 'sent' : 'blocked' }]);
+                setPrompt('');
+                
+                if (!isSafe) {
+                    // Si está bloqueado por el Guardrail
+                    const blockedMessage = "❌ **Guardrail de Seguridad Activado:** Solicitud bloqueada. No se permite contenido que infrinja las políticas éticas.";
+                    setChatHistory(prev => [...prev, { 
+                        role: 'system', 
+                        text: blockedMessage,
+                        status: 'blocked_response'
+                    }]);
+                    generateAndPlayAudio("Su solicitud ha sido bloqueada por el agente de seguridad.");
+                    return;
+                }
+
+                setIsLoading(true);
+
+                try {
+                    // 2. Prepara el historial para la API
+                    const historyForApi = chatHistory
+                        .filter(msg => msg.status === 'sent' || msg.status === 'received')
+                        .map(msg => ({ 
+                            role: msg.role === 'user' ? 'user' : 'model', 
+                            parts: [{ text: msg.text }] 
+                        }));
+
+                    historyForApi.push({ role: 'user', parts: [{ text: userMessage }] });
+
+                    const systemInstruction = "Eres un Agente de Voz de IA Seguro. Responde con un tono formal, profesional y conciso, priorizando la seguridad y la información fidedigna. Limita tus respuestas a una o dos frases.";
+
+                    const textPayload = {
+                        contents: historyForApi,
+                        systemInstruction: {
+                            parts: [{ text: systemInstruction }]
+                        },
+                        tools: [{ "google_search": {} }], 
+                    };
+
+                    // 3. Generación de Texto
+                    const textResponse = await fetchWithRetry(GEMINI_TEXT_API_URL_BASE, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(textPayload)
+                    });
+
+                    const result = await textResponse.json();
+                    const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || "No pude generar una respuesta de texto.";
+
+                    // 4. Añadir la respuesta de la IA al historial
+                    setChatHistory(prev => {
+                        const newHistory = [...prev, { role: 'model', text: generatedText, status: 'received' }];
+                        // 5. Generación de Voz (llamada asíncrona)
+                        generateAndPlayAudio(generatedText);
+                        return newHistory;
+                    });
+
+                } catch (error) {
+                    console.error("Error en el chat:", error);
+                    const errorMessage = `⚠️ Error de conexión: ${error.message}`;
+                    setChatHistory(prev => [...prev, { role: 'system', text: errorMessage, status: 'error' }]);
+                    generateAndPlayAudio("Ha ocurrido un error al conectar con el agente de inteligencia artificial.");
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // Estilo para el estado de seguridad
+            const safetyIndicator = (status) => {
+                switch (status) {
+                    case 'safe': return { icon: <CheckCircle className="text-green-500" size={18} />, label: 'Seguro' };
+                    case 'warning': return { icon: <AlertTriangle className="text-yellow-500" size={18} />, label: 'Advertencia' };
+                    case 'blocked': return { icon: <AlertTriangle className="text-red-500" size={18} />, label: 'Bloqueado' };
+                    default: return { icon: null, label: '' };
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100 flex flex-col p-4 sm:p-6 lg:p-8">
+                    <header className="mb-6 text-center">
+                        <h1 className="text-3xl font-extrabold text-indigo-700 flex items-center justify-center">
+                            <Volume2 className="w-7 h-7 mr-2" />
+                            Agente de Voz IA
+                        </h1>
+                        <p className="text-gray-600 mt-1 flex items-center justify-center text-sm">
+                            <Shield className="w-4 h-4 mr-1 text-indigo-500" />
+                            Agente con **Guardrail** de Seguridad y respuesta audible.
+                        </p>
+                    </header>
+                    
+                    {/* Elemento oculto para la reproducción de audio */}
+                    <audio ref={audioRef} className="hidden" />
+
+                    {/* Contenedor Principal del Chat */}
+                    <div className="flex-grow flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden max-w-xl w-full mx-auto border border-indigo-200">
+                        
+                        {/* Historial de Mensajes */}
+                        <div className="flex-grow p-4 space-y-4 overflow-y-auto h-96">
+                            <div className="text-center text-sm text-gray-500 p-2 bg-indigo-50 rounded-lg">
+                                👋 ¡Hola! Soy el Agente de Voz IA. Pregunta sobre seguridad, pero ten en cuenta mi Guardrail.
+                            </div>
+                            {chatHistory.map((message, index) => (
+                                <div 
+                                    key={index} 
+                                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                                >
+                                    <div className={`max-w-[85%] p-3 rounded-xl shadow-lg transition-all duration-300 ease-in-out 
+                                        ${message.role === 'user' 
+                                            ? (message.status === 'blocked' ? 'bg-red-300 text-red-900 font-medium' : 'bg-indigo-600 text-white') 
+                                            : (message.status === 'blocked_response' ? 'bg-red-100 text-red-700 font-semibold border-2 border-red-400' : 'bg-gray-100 text-gray-800')
+                                        }
+                                    `}>
+                                        <span className="font-bold capitalize text-xs block mb-1 opacity-70">
+                                            {message.role === 'user' ? 'Tú' : 'Agente de Voz'}
+                                        </span>
+                                        <div dangerouslySetInnerHTML={{ __html: message.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+                                    </div>
+                                </div>
+                            ))}
+                            {/* Indicador de carga */}
+                            {isLoading && (
+                                <div className="flex justify-start">
+                                    <div className="flex items-center bg-indigo-100 p-3 rounded-xl shadow-md text-indigo-600 animate-pulse">
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        Generando respuesta y voz...
+                                    </div>
+                                </div>
+                            )}
+                            <div ref={chatEndRef} />
+                        </div>
+
+                        {/* Área de Entrada y Guardrail */}
+                        <div className="p-4 border-t bg-gray-50">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className={`p-2 rounded-full flex items-center space-x-2 transition-colors duration-300 ${
+                                    safetyStatus === 'safe' ? 'bg-green-100' : safetyStatus === 'warning' ? 'bg-yellow-100' : 'bg-red-100'
+                                }`}>
+                                    {safetyIndicator(safetyStatus).icon}
+                                    <span className={`text-xs font-medium ${
+                                        safetyStatus === 'safe' ? 'text-green-700' : safetyStatus === 'warning' ? 'text-yellow-700' : 'text-red-700'
+                                    }`}>
+                                        {safetyIndicator(safetyStatus).label}
+                                    </span>
+                                </div>
+                                <span className="text-xs text-gray-500">Voz: Kore (Formal)</span>
+                            </div>
+                            
+                            <div className="flex space-x-3">
+                                <input
+                                    type="text"
+                                    className="flex-grow p-3 border border-indigo-300 rounded-full focus:ring-indigo-500 focus:border-indigo-500 shadow-inner disabled:bg-gray-100 transition-all"
+                                    placeholder="Escribe tu mensaje..."
+                                    value={prompt}
+                                    onChange={(e) => {
+                                        setPrompt(e.target.value);
+                                        checkSafety(e.target.value);
+                                    }}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                                    disabled={isLoading}
+                                />
+                                <button
+                                    onClick={handleSend}
+                                    disabled={isLoading || safetyStatus === 'blocked'}
+                                    className={`p-3 rounded-full shadow-xl transition-all duration-300 flex items-center justify-center transform hover:scale-105 
+                                        ${isLoading || safetyStatus === 'blocked'
+                                            ? 'bg-gray-400 cursor-not-allowed'
+                                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                        }`}
+                                    aria-label="Enviar mensaje"
+                                >
+                                    <Send size={24} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Montaje de la aplicación React
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
