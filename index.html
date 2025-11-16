@@ -283,6 +283,37 @@
 
         // --- FUNCIONES DE VOZ (TTS y STT) ---
         
+        /** Fallback: Usa la API nativa de Síntesis de Voz del navegador. */
+        function speakFallback(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); // Detener cualquier voz anterior
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'es-ES'; // Asegurar el idioma español
+                
+                // Buscar una voz en español si es posible
+                const spanishVoice = window.speechSynthesis.getVoices().find(voice => voice.lang.startsWith('es'));
+                if (spanishVoice) {
+                    utterance.voice = spanishVoice;
+                }
+
+                window.speechSynthesis.speak(utterance);
+                
+                // Opcional: Esperar a que termine de hablar (no bloqueante)
+                utterance.onend = () => {
+                    setUIState(false);
+                };
+                utterance.onerror = (e) => {
+                    console.error("Error en TTS nativo:", e);
+                    setUIState(false);
+                };
+            } else {
+                console.error("El navegador no soporta la API nativa de Speech Synthesis. Imposible usar fallback.");
+                setUIState(false);
+            }
+        }
+
+
         /**
          * Llama a la API de Gemini para generar el audio TTS y lo reproduce.
          * @param {string} text - El texto a convertir a voz.
@@ -295,7 +326,7 @@
             let audioPlayedSuccessfully = false; 
 
             // Log de diagnóstico
-            console.log("TTS API URL utilizada:", ttsApiUrl);
+            console.log("TTS API URL utilizada para el diagnóstico de 401:", ttsApiUrl);
 
             const ttsPayload = {
                 contents: [{ parts: [{ text: text }] }],
@@ -320,10 +351,15 @@
                 });
 
                 if (!response.ok) {
+                    const status = response.status;
                     const errorText = await response.text();
                     console.error("Respuesta de error de TTS API:", errorText);
-                    // Lanza un error con el código de estado para un manejo más fácil
-                    throw new Error(`TTS API error: ${response.status} ${response.statusText}`);
+
+                    // Si es un error de autorización, pasamos al fallback.
+                    if (status === 401 || status === 403) {
+                        throw new Error("TTS Authorization Error (401/403)");
+                    }
+                    throw new Error(`TTS API error: ${status} ${response.statusText}`);
                 }
                 
                 const result = await response.json();
@@ -355,7 +391,7 @@
                         };
                         audio.play().catch(e => reject(new Error(`Error al iniciar la reproducción: ${e.message}`)));
                     });
-
+                    
                 } else {
                     throw new Error("Respuesta de audio TTS incompleta o formato incorrecto.");
                 }
@@ -363,18 +399,17 @@
             } catch (error) {
                 console.error("Error al generar o reproducir TTS:", error);
                 
-                let ttsErrorMessage;
-                if (error.message.includes("401") || error.message.includes("403")) {
-                    ttsErrorMessage = "La función de voz requiere permisos de API adicionales. Parece que el entorno está bloqueando la conexión (código 401/403). Presiona 'Preview' de nuevo.";
-                } else if (error.message.includes("TTS API error")) {
-                    ttsErrorMessage = `Fallo de conexión en la API de Voz: ${error.message}.`;
+                if (error.message.includes("401") || error.message.includes("403") || error.message.includes("Authorization Error")) {
+                    // Si falla por autorización, usamos el fallback
+                    updateChat("Fallo de Autorización (401/403) para el servicio de voz de Gemini. Usando la voz nativa del navegador como alternativa.", 'error');
+                    speakFallback(text);
+                    audioPlayedSuccessfully = true; // Considerar el fallback como éxito para no restablecer UI dos veces
                 } else {
-                    ttsErrorMessage = "No se pudo generar la voz. Revisa la consola para más detalles.";
+                    // Otros errores (red, formato, etc.)
+                    updateChat("No se pudo generar la voz. Revisa la consola para más detalles.", 'error');
                 }
-                
-                updateChat(ttsErrorMessage, 'error');
             } finally {
-                // Restablecer el estado A MENOS que se haya reproducido con éxito
+                // Restablecer el estado SOLO si el audio no se reprodujo/inició con éxito (ni API ni Fallback)
                 if (!audioPlayedSuccessfully) {
                     setUIState(false);
                 }
@@ -460,6 +495,11 @@
                     parts: [{ text: "Actúa como un asistente profesional y conciso. Responde a las preguntas en español. Siempre utiliza la información más reciente de Google Search para fundamentar tus respuestas." }]
                 },
             };
+            
+            // Diagnóstico para Vercel o entornos externos
+            if (!apiKey) {
+                 console.warn("ADVERTENCIA: La clave de API está vacía. Si no estás en el entorno Canvas, la llamada fallará por 403.");
+            }
 
             try {
                 const response = await fetch(geminiApiUrl, {
@@ -479,6 +519,12 @@
                     const errorDetails = await response.text();
                     const statusText = response.statusText || 'Error desconocido';
                     console.error("Respuesta de error completa de la API:", errorDetails);
+                    
+                    // Error específico para clave de API vacía
+                    if (!apiKey && (response.status === 403 || response.status === 400)) {
+                         throw new Error(`Error ${response.status}: Clave de API Faltante. Esta aplicación requiere que la variable 'apiKey' contenga una clave válida para funcionar. Revísala.`);
+                    }
+
                     throw new Error(`Error ${response.status} (${statusText}): No se pudo obtener la respuesta. Detalles: ${errorDetails.substring(0, 100)}...`);
                 }
 
@@ -527,8 +573,8 @@
 
             } catch (error) {
                 // 6. Manejar errores críticos
-                const errorMessage = error.message.includes("401") || error.message.includes("403") 
-                    ? `Error de Conexión (401/403): Fallo de autorización. Por favor, presiona 'Preview' o intenta reiniciar el Canvas.`
+                const errorMessage = error.message.includes("Clave de API Faltante")
+                    ? `**Error Crítico (Vercel):** ${error.message}`
                     : error.message || "Ocurrió un error desconocido. Por favor, revisa la consola para más detalles.";
                     
                 updateChat(`**¡Falló la Conexión!** ${errorMessage}`, 'error');
