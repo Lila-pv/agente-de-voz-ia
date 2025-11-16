@@ -1,69 +1,146 @@
 /**
- * Vercel Serverless Function para llamar de forma segura a la API de Gemini.
- * Esta función lee la clave API de las variables de entorno (GEMINI_API_KEY)
- * y reenvía la solicitud del cliente a la API de Google, 
- * manteniendo la clave sensible oculta del frontend.
+ * Función Proxy para Vercel (Node.js) que maneja las llamadas a la API de Gemini.
+ * * Esta función está diseñada para:
+ * 1. Manejar la generación de texto (usando Google Search grounding) con gemini-2.5-flash-preview-09-2025.
+ * 2. Manejar la generación de voz (TTS) con gemini-2.5-flash-preview-tts si se detecta el flag 'isTTS: true' en el body.
+ * * Se asume que tienes una variable de entorno configurada en Vercel:
+ * GEMINI_API_KEY
  */
 
-// Importante: La GEMINI_API_KEY DEBE estar configurada en tus variables de entorno.
-const API_KEY = process.env.GEMINI_API_KEY;
-const API_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
-// Handler principal para la función serverless.
-export default async function handler(req, res) {
-    // 1. Verificar la Clave API
-    if (!API_KEY) {
-        return res.status(500).json({ 
-            error: 'GEMINI_API_KEY no está configurada en las variables de entorno.',
-            details: 'Por favor, configura GEMINI_API_KEY en tu plataforma de despliegue (ej. Vercel).'
-        });
+module.exports = async (req, res) => {
+    // Solo acepta peticiones POST
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Método no permitido. Usa POST.' });
+        return;
     }
 
-    // 2. Verificar el método POST
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Método no permitido. Solo se soporta POST.' });
+    // Encabezados de CORS para permitir la comunicación con el frontend
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Manejar preflight OPTIONS request
+    if (req.method === 'OPTIONS') {
+        res.status(200).end();
+        return;
     }
 
     try {
-        // 3. Analizar el cuerpo JSON enviado desde el cliente
-        const { prompt, systemInstruction } = req.body;
+        const { prompt, isTTS, systemInstruction, voiceName } = req.body;
 
         if (!prompt) {
-            return res.status(400).json({ error: 'Falta el campo "prompt" en el cuerpo de la solicitud.' });
+            res.status(400).json({ error: 'Falta el campo "prompt" en la solicitud.' });
+            return;
         }
 
-        // Construir el payload completo para la API de Gemini
-        const geminiPayload = {
-            contents: [{ parts: [{ text: prompt }] }],
-            // Habilitar Google Search grounding para datos en tiempo real
-            tools: [{ "google_search": {} }], 
-        };
+        let apiUrl;
+        let payload;
 
-        // Agregar la instrucción del sistema si se proporciona
-        if (systemInstruction) {
-             geminiPayload.systemInstruction = { parts: [{ text: systemInstruction }] };
+        if (isTTS) {
+            // --- Configuración para Text-to-Speech (TTS) ---
+            
+            const selectedVoice = voiceName || "Kore"; // Voz por defecto
+            
+            apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}`;
+            
+            payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: selectedVoice }
+                        }
+                    }
+                },
+            };
+
+        } else {
+            // --- Configuración para Generación de Texto con Grounding ---
+
+            apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`;
+
+            payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                tools: [{ "google_search": {} }], // Habilitar Google Search grounding
+                systemInstruction: {
+                    parts: [{ text: systemInstruction || "Actúa como un Agente de IA. Proporciona una respuesta concisa y profesional." }]
+                },
+            };
         }
 
-        // 4. Llamar a la API de Gemini usando la clave segura
-        const apiResponse = await fetch(`${API_ENDPOINT}?key=${API_KEY}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(geminiPayload)
-        });
+        // 1. Llamada a la API de Gemini (con lógica de reintento)
+        let geminiResponse;
+        const MAX_RETRIES = 3;
+        let delay = 1000;
 
-        const result = await apiResponse.json();
+        for (let i = 0; i < MAX_RETRIES; i++) {
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-        if (!apiResponse.ok) {
-            // Reenviar errores de la API de Gemini
-            console.error('Error de la API de Gemini:', result);
-            return res.status(apiResponse.status).json({ error: 'Error de API Externa', details: result });
+                if (response.status === 429) { // Límite de cuota (Rate Limit)
+                    if (i < MAX_RETRIES - 1) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2; // Espera exponencial
+                        continue;
+                    } else {
+                        throw new Error('Límite de cuota excedido después de varios reintentos.');
+                    }
+                }
+
+                geminiResponse = await response.json();
+
+                if (!response.ok) {
+                    // Manejar errores de la API (ej: clave inválida, error del modelo)
+                    const errorDetails = geminiResponse.error || geminiResponse;
+                    res.status(response.status).json({ 
+                        error: isTTS ? 'Error al generar TTS' : 'Error al generar texto', 
+                        details: errorDetails 
+                    });
+                    return;
+                }
+                
+                // Si todo sale bien, salimos del bucle
+                break; 
+
+            } catch (error) {
+                if (i < MAX_RETRIES - 1) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; 
+                    continue;
+                } else {
+                    throw error;
+                }
+            }
         }
+        
+        // 2. Procesar y devolver la respuesta
+        if (isTTS) {
+            // --- Devolver respuesta TTS ---
+            const audioPart = geminiResponse.candidates?.[0]?.content?.parts?.[0];
+            const audioData = audioPart?.inlineData?.data;
+            const mimeType = audioPart?.inlineData?.mimeType;
 
-        // 5. Enviar la respuesta exitosa de vuelta al cliente
-        res.status(200).json(result);
+            if (audioData && mimeType) {
+                // El cliente espera estos campos: audioData y mimeType
+                res.status(200).json({ audioData, mimeType });
+            } else {
+                res.status(500).json({ error: 'Respuesta TTS incompleta o vacía.', details: geminiResponse });
+            }
+        } else {
+            // --- Devolver respuesta de Texto ---
+            // El cliente espera la respuesta estándar del modelo de texto
+            res.status(200).json(geminiResponse);
+        }
 
     } catch (error) {
-        console.error('Error de Proxy:', error);
-        res.status(500).json({ error: 'Error interno del servidor durante la llamada a la API.', details: error.message });
+        console.error('Error interno del proxy:', error);
+        res.status(500).json({ error: 'Error interno del servidor proxy.', details: error.message });
     }
-}
+};
