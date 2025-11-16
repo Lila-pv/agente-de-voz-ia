@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agente de Voz IA Seguro</title>
     <!-- Incluimos Tailwind CSS para el estilizado -->
-    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script>
       // Configuración de Tailwind para usar la fuente Inter y estilos modernos
       tailwind.config = {
@@ -19,24 +19,25 @@
       }
     </script>
     <!-- Incluimos React y ReactDOM desde CDN -->
-    <script src="[https://unpkg.com/react@18/umd/react.development.js](https://unpkg.com/react@18/umd/react.development.js)"></script>
-    <script src="[https://unpkg.com/react-dom@18/umd/react-dom.development.js](https://unpkg.com/react-dom@18/umd/react-dom.development.js)"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <!-- Incluimos Babel para transformar JSX al vuelo (necesario en este formato) -->
-    <script src="[https://unpkg.com/@babel/standalone/babel.min.js](https://unpkg.com/@babel/standalone/babel.min.js)"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Incluimos Lucide Icons para los iconos de la interfaz -->
-    <script src="[https://unpkg.com/lucide@latest](https://unpkg.com/lucide@latest)"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="bg-gray-50 antialiased min-h-screen">
     <div id="root"></div>
 
     <!-- Script principal de la aplicación React (type="text/babel" es CRUCIAL) -->
+    <!-- El montaje de React se realiza al final de este bloque. -->
     <script type="text/babel">
         const { useState, useCallback, useRef, useEffect } = React;
         const { Send, Volume2, Shield, Loader2, CheckCircle, AlertTriangle } = lucide;
 
         // --- CONFIGURACIÓN DE LAS APIs ---
-        const GEMINI_TEXT_API_URL_BASE = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent)';
-        const GEMINI_TTS_API_URL_BASE = '[https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent)';
+        const GEMINI_TEXT_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent';
+        const GEMINI_TTS_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent';
         const apiKey = ""; // La clave API será inyectada por el entorno de Canvas
 
         // Función de utilidad para Base64 a ArrayBuffer (necesaria para el audio PCM)
@@ -395,9 +396,17 @@
             );
         }
 
-        // Montaje de la aplicación React
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        // --- MONTAJE DE LA APLICACIÓN ---
+        // Montamos la aplicación inmediatamente después de que Babel haya procesado el componente App.
+        const rootElement = document.getElementById('root');
+        if (rootElement) {
+            // Usamos ReactDOM.createRoot para React 18
+            const root = ReactDOM.createRoot(rootElement);
+            root.render(<App />);
+        } else {
+            // Este console.error es solo de respaldo
+            console.error("Error: Contenedor 'root' no encontrado.");
+        }
     </script>
 </body>
 </html>
