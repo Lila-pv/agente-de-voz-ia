@@ -33,7 +33,7 @@
 
     <div class="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-6 flex flex-col h-[85vh]">
         <h1 class="text-3xl font-bold text-gray-800 text-center mb-2">Asistente de Voz Gemini</h1>
-        <p id="status" class="text-sm text-center text-blue-600 mb-4 h-5">Pulsa el micrófono para empezar.</p>
+        <p id="status" class="text-sm text-center text-blue-600 mb-4 h-5">Pulsa el micrófono o escribe tu pregunta.</p>
 
         <!-- Contenedor de Conversación -->
         <div id="chat-history" class="flex-grow overflow-y-auto space-y-4 p-3 border border-gray-200 rounded-xl bg-gray-50 mb-6">
@@ -43,6 +43,22 @@
         <!-- Área de Controles -->
         <div class="flex flex-col items-center space-y-4">
             
+            <!-- Entrada de Texto (NUEVO) -->
+            <div class="w-full flex space-x-2">
+                <input type="text" id="text-input" placeholder="Escribe tu pregunta aquí..."
+                       class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150">
+                <button id="send-button" onclick="sendTextQuery()"
+                        class="p-3 bg-green-500 text-white rounded-lg shadow-md hover:bg-green-600 transition duration-150">
+                    <!-- Icono de Enviar (simulado con SVG) -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m22 2-7 20-4-9-9-4 20-7z"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- Separador -->
+            <p class="text-xs text-gray-400 py-2">O</p>
+
             <!-- Botón de Micrófono -->
             <button id="mic-button" 
                     class="p-6 rounded-full bg-blue-600 text-white shadow-xl hover:bg-blue-700 transition duration-300 ease-in-out transform hover:scale-105"
@@ -81,6 +97,15 @@
         const micLabel = document.getElementById('mic-label');
         const sourceContainer = document.getElementById('source-container');
         const sourceLink = document.getElementById('source-link');
+        const textInput = document.getElementById('text-input'); // Nuevo
+        const sendButton = document.getElementById('send-button'); // Nuevo
+
+        // Listener para enviar la consulta al presionar Enter (NUEVO)
+        textInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendTextQuery();
+            }
+        });
 
         // --- Funciones de Utilidad y UI ---
 
@@ -88,9 +113,11 @@
          * Actualiza el estado visual y de texto del asistente.
          * @param {string} message Mensaje de estado.
          * @param {boolean} listening Indica si el micrófono está activo.
+         * @param {string} color Clase de color de Tailwind (ej: 'text-blue-600', 'text-red-600').
          */
-        function updateUIState(message, listening = false) {
+        function updateUIState(message, listening = false, color = 'text-blue-600') {
             statusElement.textContent = message;
+            statusElement.className = `text-sm text-center mb-4 h-5 font-medium ${color}`;
             micLabel.textContent = listening ? 'Escuchando...' : 'Haz click para hablar';
             isListening = listening;
 
@@ -98,10 +125,14 @@
                 micButton.classList.add('listening');
                 micButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
                 micButton.classList.add('bg-red-500', 'hover:bg-red-600');
+                textInput.disabled = true; // Deshabilitar texto mientras escucha voz
+                sendButton.disabled = true;
             } else {
                 micButton.classList.remove('listening');
                 micButton.classList.remove('bg-red-500', 'hover:bg-red-600');
                 micButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                textInput.disabled = false;
+                sendButton.disabled = false;
             }
         }
         
@@ -152,11 +183,25 @@
                 console.error("La Síntesis de Voz no es compatible con este navegador.");
                 return;
             }
+            // Detener cualquier voz anterior para evitar superposiciones
+            synth.cancel(); 
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'es-ES'; // Establecer el idioma a español
             synth.speak(utterance);
         }
         
+        // --- Lógica de la Entrada de Texto (NUEVO) ---
+        function sendTextQuery() {
+            const query = textInput.value.trim();
+            if (query) {
+                addMessage(query, 'user');
+                textInput.value = ''; // Limpiar la entrada
+                getAIResponse(query);
+            } else {
+                updateUIState("Por favor, escribe algo para empezar.", false, 'text-gray-500');
+            }
+        }
+
         // --- Lógica del Reconocimiento de Voz (STT) ---
 
         /**
@@ -164,15 +209,18 @@
          */
         function startRecognition() {
             if (!SpeechRecognition) {
-                updateUIState("Error: La API de Reconocimiento de Voz no es compatible con este navegador.");
+                updateUIState("Error: La API de Reconocimiento de Voz no es compatible con este navegador.", false, 'text-red-600');
                 return;
+            }
+            if (statusElement.classList.contains('text-red-600')) {
+                updateUIState("Pulsa el micrófono o escribe tu pregunta.");
             }
 
             if (!recognition) {
                 recognition = new SpeechRecognition();
-                recognition.continuous = false; // Detener después de una pausa
-                recognition.lang = 'es-ES'; // Reconocer en español
-                recognition.interimResults = false; // Solo resultados finales
+                recognition.continuous = false;
+                recognition.lang = 'es-ES';
+                recognition.interimResults = false;
                 recognition.maxAlternatives = 1;
                 
                 recognition.onstart = () => {
@@ -187,14 +235,13 @@
 
                 recognition.onend = () => {
                     if (isListening) {
-                        // Solo actualiza si no se detuvo por un error o toggle
                         updateUIState("Procesando tu solicitud...");
                     }
                     isListening = false;
                 };
 
                 recognition.onerror = (event) => {
-                    updateUIState(`Error de voz: ${event.error}. Vuelve a intentarlo.`);
+                    updateUIState(`Error de voz: ${event.error}. Vuelve a intentarlo.`, false, 'text-red-600');
                     isListening = false;
                     micButton.classList.remove('listening');
                 };
@@ -204,9 +251,9 @@
                 recognition.start();
             } catch (e) {
                 console.error("Error al iniciar el reconocimiento:", e);
-                updateUIState("Ya estoy escuchando o hubo un error al iniciar. Intenta de nuevo.");
-                isListening = true; // Forzar el estado para permitir toggle
-                toggleRecognition(); // Forzar reinicio
+                updateUIState("Ya estoy escuchando o hubo un error al iniciar. Intenta de nuevo.", false, 'text-red-600');
+                isListening = true; 
+                try { recognition.stop(); } catch (stopError) { /* ignore */ }
             }
         }
         
@@ -231,6 +278,11 @@
         async function getAIResponse(prompt) {
             updateUIState("Pensando... (Gemini está generando la respuesta)");
             
+            // Deshabilitar la entrada de texto y el botón de voz mientras se procesa la IA
+            textInput.disabled = true;
+            sendButton.disabled = true;
+            micButton.disabled = true;
+
             const systemPrompt = "Actúa como un asistente de voz amigable y útil. Responde a las preguntas de forma concisa y natural. Si la pregunta requiere información actualizada, usa las herramientas de búsqueda.";
             
             const payload = {
@@ -252,13 +304,13 @@
                     });
 
                     if (!response.ok) {
-                        // Si es un error de servidor (ej. 500), intentar de nuevo
                         if (response.status >= 500 && attempt < maxRetries - 1) {
                             const delay = Math.pow(2, attempt) * 1000;
                             await new Promise(resolve => setTimeout(resolve, delay));
                             continue;
                         }
-                        throw new Error(`Error HTTP: ${response.status}`);
+                        const errorBody = await response.text();
+                        throw new Error(`Error HTTP ${response.status}. Detalle: ${errorBody.substring(0, 50)}...`);
                     }
 
                     const result = await response.json();
@@ -283,6 +335,11 @@
                             }
                         }
                         displaySource(source);
+                        
+                        // Habilitar entradas
+                        textInput.disabled = false;
+                        sendButton.disabled = false;
+                        micButton.disabled = false;
 
                         return; // Éxito
                     } else {
@@ -291,10 +348,16 @@
                 } catch (error) {
                     console.error(`Intento ${attempt + 1} fallido:`, error);
                     if (attempt === maxRetries - 1) {
-                        updateUIState("Error al conectar con la IA. Por favor, inténtalo de nuevo más tarde.");
+                        const errorMessage = error.message || "Error de red desconocido.";
+                        updateUIState(`Error Final (reintento fallido): ${errorMessage}`, false, 'text-red-600');
                         addMessage("Lo siento, no pude procesar tu solicitud. Hubo un error de conexión.", 'ai');
                         speakResponse("Lo siento, no pude procesar tu solicitud.");
                         displaySource(null);
+                        
+                        // Habilitar entradas
+                        textInput.disabled = false;
+                        sendButton.disabled = false;
+                        micButton.disabled = false;
                     }
                 }
             }
