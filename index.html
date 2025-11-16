@@ -21,6 +21,7 @@
             max-width: 85%;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
             line-height: 1.6;
+            word-wrap: break-word;
         }
         .user-bubble {
             background-color: #3b82f6; /* Blue 500 */
@@ -28,6 +29,16 @@
             border-radius: 1.5rem 1.5rem 0.5rem 1.5rem;
             padding: 1rem;
             max-width: 85%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            line-height: 1.6;
+            word-wrap: break-word;
+        }
+        .error-bubble {
+            background-color: #fee2e2; /* Red 100 */
+            color: #b91c1c; /* Red 700 */
+            border-radius: 1.5rem;
+            padding: 1rem;
+            max-width: 95%;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             line-height: 1.6;
         }
@@ -97,7 +108,7 @@
                 <button
                     id="mic-button"
                     onclick="toggleSpeechInput()"
-                    class="p-3 bg-red-500 text-white rounded-full hover:bg-red-600 transition duration-150 shadow-md"
+                    class="p-3 bg-red-500 text-white rounded-full hover:bg-red-600 transition duration-150 shadow-md disabled:opacity-50"
                     title="Hablar (Speech-to-Text)"
                 >
                     <i class="fas fa-microphone"></i>
@@ -134,7 +145,7 @@
         const statusIcon = document.getElementById('status-icon');
         const loadingDots = document.getElementById('loading-dots');
 
-        // Estado
+        // Estado y Servicios
         let isListening = false;
         let recognition = null;
         let audioContext = null;
@@ -156,14 +167,6 @@
         function writeString(view, offset, string) {
             for (let i = 0; i < string.length; i++) {
                 view.setUint8(offset + i, string.charCodeAt(i));
-            }
-        }
-
-        /** Escribe los datos PCM de 16 bits en el DataView. */
-        function floatTo16BitPCM(output, offset, input) {
-            for (let i = 0; i < input.length; i++, offset += 2) {
-                const s = Math.max(-1, Math.min(1, input[i]));
-                output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
             }
         }
 
@@ -192,7 +195,7 @@
         /** Convierte datos PCM (Int16Array) a un Blob WAV. */
         function pcmToWav(pcm16, sampleRate) {
             const numberOfChannels = 1;
-            const bytesPerSample = 2; // 16-bit PCM
+            const bytesPerSample = 2; // 16-bit PCM (L16)
 
             const dataLength = pcm16.length * bytesPerSample;
             const buffer = new ArrayBuffer(44 + dataLength);
@@ -213,6 +216,13 @@
 
         // --- FUNCIONES DE UI Y CHAT ---
 
+        /** Inicializa el AudioContext la primera vez que se requiere. */
+        function ensureAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
         /** Actualiza el estado de la UI (botones, indicador de carga). */
         function setUIState(isDisabled, status = '', icon = '', showDots = true) {
             userInput.disabled = isDisabled;
@@ -232,14 +242,21 @@
         /**
          * Añade un nuevo mensaje a la ventana de chat.
          * @param {string} text - El contenido del mensaje.
-         * @param {string} sender - 'user' o 'assistant'.
+         * @param {string} sender - 'user', 'assistant' o 'error'.
          */
         function updateChat(text, sender) {
             const messageContainer = document.createElement('div');
             messageContainer.className = sender === 'user' ? 'flex justify-end' : 'flex justify-start';
 
             const messageBubble = document.createElement('div');
-            messageBubble.className = sender === 'user' ? 'user-bubble' : 'assistant-bubble relative';
+            
+            if (sender === 'user') {
+                messageBubble.className = 'user-bubble';
+            } else if (sender === 'assistant') {
+                messageBubble.className = 'assistant-bubble relative';
+            } else if (sender === 'error') {
+                 messageBubble.className = 'error-bubble relative';
+            }
 
             // Conversión básica de Markdown a HTML (negrita y saltos de línea)
             let htmlText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
@@ -247,10 +264,10 @@
 
             messageBubble.innerHTML = htmlText;
 
-            // Añadir icono de audio para el asistente
+            // Añadir icono de audio para el asistente si no es un error
             if (sender === 'assistant') {
                 const audioIcon = document.createElement('i');
-                audioIcon.className = 'fas fa-volume-up text-teal-700 ml-2 cursor-pointer transition duration-150 hover:text-teal-900 absolute -right-5 top-1';
+                audioIcon.className = 'fas fa-volume-up text-teal-700 ml-2 cursor-pointer transition duration-150 hover:text-teal-900 absolute -right-6 top-1';
                 audioIcon.title = 'Escuchar respuesta';
                 audioIcon.onclick = () => speakResponse(text);
                 messageBubble.appendChild(audioIcon);
@@ -271,11 +288,12 @@
          * @param {string} text - El texto a convertir a voz.
          */
         async function speakResponse(text) {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            ensureAudioContext();
 
             setUIState(true, 'Generando voz...', 'fas fa-volume-up', true);
+
+            // Declaramos audioData fuera del bloque try para que sea accesible en finally.
+            let audioData = null;
 
             const ttsPayload = {
                 contents: [{ parts: [{ text: text }] }],
@@ -283,10 +301,14 @@
                     responseModalities: ["AUDIO"],
                     speechConfig: {
                         voiceConfig: {
-                            prebuiltVoiceConfig: { voiceName: "Kore" } // Voz en español con tono firme
+                            prebuiltVoiceConfig: { voiceName: "Kore" } 
                         }
                     }
                 },
+                // Se especifica el idioma en el prompt aunque el modelo lo detecta automáticamente.
+                systemInstruction: {
+                    parts: [{ text: "Responde siempre en español. La voz generada debe ser en español de España (es-ES)." }]
+                }
             };
 
             try {
@@ -297,20 +319,19 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`TTS API error: ${response.statusText}`);
+                    throw new Error(`TTS API error: ${response.status} ${response.statusText}`);
                 }
                 
                 const result = await response.json();
                 const part = result?.candidates?.[0]?.content?.parts?.[0];
-                const audioData = part?.inlineData?.data;
+                audioData = part?.inlineData?.data; // Asignación aquí
                 const mimeType = part?.inlineData?.mimeType;
 
                 if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
                     const match = mimeType.match(/rate=(\d+)/);
-                    const sampleRate = match ? parseInt(match[1], 10) : 24000; // Asumir 24kHz si no se especifica
+                    const sampleRate = match ? parseInt(match[1], 10) : 24000; 
 
                     const pcmData = base64ToArrayBuffer(audioData);
-                    // API returns signed PCM16 audio data.
                     const pcm16 = new Int16Array(pcmData);
                     const wavBlob = pcmToWav(pcm16, sampleRate);
                     const audioUrl = URL.createObjectURL(wavBlob);
@@ -330,17 +351,21 @@
 
             } catch (error) {
                 console.error("Error al generar o reproducir TTS:", error);
-                alert("Error al generar la voz: " + error.message);
-                setUIState(false);
+                updateChat("No se pudo generar la voz. Verifica la consola para más detalles.", 'error');
+                // No llamamos a setUIState(false) aquí, lo dejamos al finally.
             } finally {
-                setUIState(false);
+                // Si audioData es null, significa que hubo un error en la generación (catch fue llamado) 
+                // o la respuesta fue malformada, y debemos restablecer el estado de la UI.
+                if (!audioData) {
+                    setUIState(false);
+                }
             }
         }
 
         /** Inicia o detiene el reconocimiento de voz. */
         function toggleSpeechInput() {
             if (!('webkitSpeechRecognition' in window)) {
-                alert("Tu navegador no soporta el reconocimiento de voz (Speech Recognition).");
+                updateChat("Tu navegador no soporta el reconocimiento de voz. Usa la entrada de texto.", 'error');
                 return;
             }
 
@@ -354,8 +379,7 @@
             if (isListening) {
                 recognition.stop();
                 setUIState(false);
-                micButton.classList.remove('is-listening');
-                micButton.classList.remove('bg-red-700');
+                micButton.classList.remove('is-listening', 'bg-red-700');
                 micButton.classList.add('bg-red-500');
                 isListening = false;
                 return;
@@ -364,23 +388,21 @@
             // Iniciar escucha
             recognition.start();
             isListening = true;
-            micButton.classList.add('is-listening');
+            micButton.classList.add('is-listening', 'bg-red-700');
             micButton.classList.remove('bg-red-500');
-            micButton.classList.add('bg-red-700');
-            setUIState(true, 'Escuchando...', 'fas fa-microphone', false);
+            setUIState(true, 'Escuchando... Di algo.', 'fas fa-microphone', false);
             userInput.value = ''; // Limpiar entrada mientras escucha
 
             recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
                 userInput.value = transcript;
-                recognition.stop();
             };
-
+            
+            // Cuando deja de escuchar (ya sea por tiempo o por el usuario)
             recognition.onend = () => {
                 if (isListening) {
                     isListening = false;
-                    micButton.classList.remove('is-listening');
-                    micButton.classList.remove('bg-red-700');
+                    micButton.classList.remove('is-listening', 'bg-red-700');
                     micButton.classList.add('bg-red-500');
                     setUIState(false);
                     if (userInput.value.trim()) {
@@ -392,7 +414,9 @@
             recognition.onerror = (event) => {
                 console.error('Error de reconocimiento de voz:', event.error);
                 recognition.stop();
-                alert('Error en la entrada de voz: ' + event.error);
+                micButton.classList.remove('is-listening', 'bg-red-700');
+                micButton.classList.add('bg-red-500');
+                updateChat(`Error en la entrada de voz: ${event.error}.`, 'error');
             };
         }
 
@@ -427,6 +451,7 @@
 
                 if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
                     const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 500;
+                    console.warn(`Intento ${attempt + 1}: Error ${response.status}. Reintentando en ${delay.toFixed(0)}ms...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchWithBackoff(userQuery, attempt + 1);
                 }
@@ -434,20 +459,20 @@
                 if (!response.ok) {
                     // Intentar leer el cuerpo del error si es posible
                     const errorDetails = await response.text();
+                    const statusText = response.statusText || 'Error desconocido';
                     console.error("Respuesta de error completa de la API:", errorDetails);
-                    throw new Error(`Error de API: ${response.status} ${response.statusText}. Detalles: ${errorDetails.substring(0, 100)}...`);
+                    throw new Error(`Error ${response.status} (${statusText}): No se pudo obtener la respuesta. Detalles: ${errorDetails.substring(0, 100)}...`);
                 }
 
                 return await response.json();
 
             } catch (error) {
                 if (attempt < MAX_RETRIES) {
-                    const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 500;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    return fetchWithBackoff(userQuery, attempt + 1);
+                    // El reintento ocurrirá dentro de la recursión si es un error temporal (429/5xx)
+                    throw error;
                 }
                 console.error("Error final después de múltiples reintentos:", error);
-                throw new Error(`Lo siento, no pude comunicarme con el servidor después de ${MAX_RETRIES} intentos.`);
+                throw new Error(`Lo siento, no pude comunicarme con el servidor después de ${MAX_RETRIES} intentos. Por favor, revisa tu conexión o intenta presionar 'Preview' de nuevo.`);
             }
         }
 
@@ -468,13 +493,13 @@
                 const result = await fetchWithBackoff(prompt);
                 const candidate = result.candidates?.[0];
 
-                let assistantResponse = "Lo siento, hubo un problema al generar la respuesta.";
+                let assistantResponse = "Lo siento, hubo un problema al generar la respuesta. La estructura de la respuesta de la API no fue la esperada.";
 
                 if (candidate && candidate.content?.parts?.[0]?.text) {
                     assistantResponse = candidate.content.parts[0].text;
                 } else if (result.error) {
                     assistantResponse = `Error de API: ${result.error.message}`;
-                    console.error("Error de la API:", result.error);
+                    console.error("Error de la API en el resultado:", result.error);
                 }
 
                 // 4. Añadir respuesta del asistente al chat
@@ -486,15 +511,12 @@
             } catch (error) {
                 // 6. Manejar errores críticos
                 const errorMessage = error.message.includes("403") 
-                    ? `Error de Configuración (403): La clave de API no está disponible en este entorno. Por favor, reinicia el canvas para un nuevo intento.`
+                    ? `Error de Conexión (403/Forbidden): El entorno de ejecución está bloqueando la comunicación. Por favor, presiona 'Preview' o intenta reiniciar el Canvas.`
                     : error.message || "Ocurrió un error desconocido. Por favor, revisa la consola para más detalles.";
                     
-                updateChat(`**Error:** ${errorMessage}`, 'assistant');
-                console.error("Error en handleQuery:", error);
-            } finally {
-                // 7. Re-habilitar UI
-                setUIState(false);
-                userInput.focus();
+                updateChat(`**¡Falló la Conexión!** ${errorMessage}`, 'error');
+                console.error("Error crítico en handleQuery:", error);
+                setUIState(false); // Asegurar que la UI se restablezca
             }
         }
 
