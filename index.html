@@ -3,591 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asistente de Voz y Texto Gemini</title>
-    <!-- Incluyendo Tailwind CSS -->
+    <!-- Título solicitado: Agente de IA con Voz y Texto -->
+    <title>Agente de IA con Voz y Texto</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7f9fb;
-        }
-        /* Estilos de burbuja */
-        .assistant-bubble {
-            background-color: #e0f2f1; /* Teal 50 */
-            border-radius: 1.5rem 1.5rem 1.5rem 0.5rem;
-            padding: 1rem;
-            max-width: 85%;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-            line-height: 1.6;
-            word-wrap: break-word;
-        }
-        .user-bubble {
-            background-color: #3b82f6; /* Blue 500 */
-            color: white;
-            border-radius: 1.5rem 1.5rem 0.5rem 1.5rem;
-            padding: 1rem;
-            max-width: 85%;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            line-height: 1.6;
-            word-wrap: break-word;
-        }
-        .error-bubble {
-            background-color: #fee2e2; /* Red 100 */
-            color: #b91c1c; /* Red 700 */
-            border-radius: 1.5rem;
-            padding: 1rem;
-            max-width: 95%;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            line-height: 1.6;
-        }
-        /* Animación de carga (puntos) */
-        .loading-dot {
-            animation: bounce 0.6s infinite alternate;
-        }
-        .loading-dot:nth-child(2) { animation-delay: 0.2s; }
-        .loading-dot:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes bounce {
-            from { transform: translateY(0); }
-            to { transform: translateY(-8px); }
-        }
-        /* Animación de escucha (micrófono) */
-        .is-listening {
-            animation: pulse 1s infinite;
-        }
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(20, 184, 166, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
+        body { font-family: 'Inter', sans-serif; }
+        /* Estilo para que el texto pre-formateado mantenga saltos de línea */
+        #responseOutput {
+            white-space: pre-wrap; 
+            word-break: break-word; /* Asegura que las URLs largas no rompan el layout */
         }
     </style>
 </head>
-<body class="min-h-screen flex items-center justify-center p-4">
-
-    <div id="app" class="w-full max-w-2xl bg-white rounded-xl shadow-2xl flex flex-col h-[80vh]">
-
-        <!-- Encabezado -->
-        <header class="p-4 border-b border-gray-100 bg-teal-600 rounded-t-xl">
-            <h1 class="text-xl font-bold text-white">Asistente de Voz y Texto</h1>
-            <p class="text-sm text-teal-200">Escribe o habla tu consulta. La respuesta se leerá en voz alta.</p>
-        </header>
-
-        <!-- Área de Conversación -->
-        <main id="chat-window" class="flex-grow p-4 overflow-y-auto space-y-4">
-            <!-- Mensaje de Bienvenida -->
-            <div class="flex justify-start">
-                <div class="assistant-bubble">
-                    Hola! Soy tu asistente. ¡Puedes hablarme o escribirme!
-                </div>
-            </div>
-            <!-- Los mensajes se añadirán aquí -->
-        </main>
-
-        <!-- Indicador de Carga/Estado -->
-        <div id="status-indicator" class="p-3 flex justify-start items-center space-x-3 hidden">
-            <i id="status-icon" class="fas fa-magic text-teal-500"></i>
-            <span id="status-text" class="text-sm text-gray-500">Generando respuesta...</span>
-            <div id="loading-dots" class="flex space-x-1">
-                <div class="w-2 h-2 bg-teal-500 rounded-full loading-dot"></div>
-                <div class="w-2 h-2 bg-teal-500 rounded-full loading-dot"></div>
-                <div class="w-2 h-2 bg-teal-500 rounded-full loading-dot"></div>
-            </div>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8">
+    <div class="max-w-3xl mx-auto bg-white p-6 rounded-xl shadow-2xl border border-gray-100">
+        <!-- Título Principal y Icono -->
+        <h1 class="text-3xl font-extrabold mb-2 text-indigo-700 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bot mr-3 text-emerald-500"><path d="M12 8V4H8"/><path d="M2 13V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M10 9h4"/><path d="M8 17h8"/><path d="M20 9H4"/></svg>
+            Agente de IA con Voz y Texto
+        </h1>
+        <p class="text-sm text-gray-500 mb-6">Modelo: Gemini Flash (vía Proxy Seguro). La funcionalidad de voz puede implementarse en esta misma interfaz.</p>
+        
+        <!-- Área de Input para el Prompt -->
+        <div class="mb-6">
+            <label for="prompt" class="block text-md font-semibold text-gray-700 mb-2">
+                Escribe tu consulta:
+            </label>
+            <textarea id="prompt" rows="4" 
+                      class="mt-1 block w-full rounded-xl border border-gray-300 shadow-inner focus:border-indigo-600 focus:ring-indigo-600 p-4 text-gray-800 transition duration-150 resize-none" 
+                      placeholder="Ej: ¿Qué está pasando con las noticias de tecnología hoy?"></textarea>
         </div>
 
-        <!-- Área de Entrada -->
-        <footer class="p-4 border-t border-gray-100 bg-gray-50 rounded-b-xl">
-            <div class="flex space-x-3 items-center">
-                <input
-                    type="text"
-                    id="user-input"
-                    class="flex-grow p-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition duration-150"
-                    placeholder="Escribe o presiona el micrófono..."
-                    onkeypress="if(event.key === 'Enter') handleQuery()"
-                >
-                <button
-                    id="mic-button"
-                    onclick="toggleSpeechInput()"
-                    class="p-3 bg-red-500 text-white rounded-full hover:bg-red-600 transition duration-150 shadow-md disabled:opacity-50"
-                    title="Hablar (Speech-to-Text)"
-                >
-                    <i class="fas fa-microphone"></i>
-                </button>
-                <button
-                    id="send-button"
-                    onclick="handleQuery()"
-                    class="px-5 py-3 bg-teal-600 text-white font-semibold rounded-full hover:bg-teal-700 transition duration-150 shadow-md disabled:opacity-50"
-                    title="Enviar consulta"
-                >
-                    <i class="fas fa-paper-plane"></i>
-                </button>
+        <!-- Controles de Interacción -->
+        <div class="flex space-x-4 mb-8">
+            <button id="sendButton" 
+                    class="flex-1 py-3 px-4 border border-transparent rounded-xl shadow-lg text-white font-bold bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-offset-2 focus:ring-indigo-500 transition duration-200 ease-in-out transform hover:scale-[1.01] disabled:bg-indigo-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-send inline-block mr-2"><path d="m22 2-7 14-5-5-14-7z"/><path d="M22 2 11 13"/></svg>
+                Enviar Texto
+            </button>
+            
+            <!-- Botón para futura función de Voz (actualmente desactivado) -->
+            <button id="voiceButton" disabled
+                    class="flex-none py-3 px-4 border border-transparent rounded-xl shadow-lg text-white font-bold bg-emerald-500 opacity-50 cursor-not-allowed">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic-vocal inline-block"><path d="m12 11-1 9-2-5-5-2-9-1 9 1 5 2 2 5 1-9-1-9 1-9"/><path d="m12 11 1 9 2-5 5-2 9-1-9 1-5 2-2 5-1-9 1-9 1-9"/></svg>
+            </button>
+        </div>
+
+        <!-- Indicador de Carga -->
+        <div id="loading" class="mt-4 hidden text-center text-indigo-600 font-bold text-lg p-2 rounded-lg bg-indigo-50 animate-pulse">
+            <span class="inline-block mr-2">...</span> Pensando y buscando información...
+        </div>
+
+        <!-- Área de Output para la Respuesta -->
+        <div class="mt-8">
+            <h2 class="text-xl font-extrabold border-b-2 border-indigo-200 pb-2 mb-4 text-gray-800 flex justify-between items-center">
+                Respuesta del Agente
+                <span id="status" class="text-xs font-medium text-gray-400"></span>
+            </h2>
+            <div id="responseOutput" class="p-4 bg-gray-100 rounded-xl border border-gray-200 text-gray-800 text-sm min-h-[150px] leading-relaxed shadow-inner transition duration-300">
+                Aquí aparecerá el texto generado por la IA, junto con las fuentes si se utiliza Google Search.
             </div>
-        </footer>
+        </div>
     </div>
 
     <script>
-        // --- CONSTANTES Y CONFIGURACIÓN ---
-        const GEMINI_API_MODEL = 'gemini-2.5-flash-preview-09-2025';
-        const TTS_API_MODEL = 'gemini-2.5-flash-preview-tts';
-        const apiKey = ""; // Canvas environment will inject the API key
+        const sendButton = document.getElementById('sendButton');
+        const promptInput = document.getElementById('prompt');
+        const responseOutput = document.getElementById('responseOutput');
+        const loadingIndicator = document.getElementById('loading');
+        const statusDisplay = document.getElementById('status');
         
-        // URLs de la API
-        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_API_MODEL}:generateContent?key=${apiKey}`;
-        const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${TTS_API_MODEL}:generateContent?key=${apiKey}`;
-
-        // Elementos UI
-        const chatWindow = document.getElementById('chat-window');
-        const userInput = document.getElementById('user-input');
-        const sendButton = document.getElementById('send-button');
-        const micButton = document.getElementById('mic-button');
-        const statusIndicator = document.getElementById('status-indicator');
-        const statusText = document.getElementById('status-text');
-        const statusIcon = document.getElementById('status-icon');
-        const loadingDots = document.getElementById('loading-dots');
-
-        // Estado y Servicios
-        let isListening = false;
-        let recognition = null;
-        let audioContext = null;
-
-        // --- FUNCIONES DE UTILIDAD (PCM a WAV) ---
+        // La URL del endpoint de tu función proxy.
+        const PROXY_URL = '/api/gemini-proxy'; 
         
-        /** Convierte una cadena Base64 a un ArrayBuffer. */
-        function base64ToArrayBuffer(base64) {
-            const binaryString = window.atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            return bytes.buffer;
-        }
-
-        /** Escribe una cadena en un DataView. */
-        function writeString(view, offset, string) {
-            for (let i = 0; i < string.length; i++) {
-                view.setUint8(offset + i, string.charCodeAt(i));
-            }
-        }
-
-        /** Escribe los encabezados WAV. */
-        function writeHeaders(view, sampleRate, numberOfChannels, bytesPerSample, dataLength) {
-            // RIFF chunk descriptor
-            writeString(view, 0, 'RIFF');
-            view.setUint32(4, 36 + dataLength, true); // Total size
-            writeString(view, 8, 'WAVE');
-
-            // fmt sub-chunk
-            writeString(view, 12, 'fmt ');
-            view.setUint32(16, 16, true); // Sub-chunk size (16 for PCM)
-            view.setUint16(20, 1, true); // Audio format (1 for PCM)
-            view.setUint16(22, numberOfChannels, true); // Number of channels
-            view.setUint32(24, sampleRate, true); // Sample rate
-            view.setUint32(28, sampleRate * numberOfChannels * bytesPerSample, true); // Byte rate
-            view.setUint16(32, numberOfChannels * bytesPerSample, true); // Block align
-            view.setUint16(34, bytesPerSample * 8, true); // Bits per sample
-
-            // data sub-chunk
-            writeString(view, 36, 'data');
-            view.setUint32(40, dataLength, true); // Data size
-        }
-
-        /** Convierte datos PCM (Int16Array) a un Blob WAV. */
-        function pcmToWav(pcm16, sampleRate) {
-            const numberOfChannels = 1;
-            const bytesPerSample = 2; // 16-bit PCM (L16)
-
-            const dataLength = pcm16.length * bytesPerSample;
-            const buffer = new ArrayBuffer(44 + dataLength);
-            const view = new DataView(buffer);
-
-            writeHeaders(view, sampleRate, numberOfChannels, bytesPerSample, dataLength);
-
-            // Copy PCM data
-            const pcm8 = new Uint8Array(pcm16.buffer);
-            const dataOffset = 44;
-            for (let i = 0; i < pcm8.length; i++) {
-                view.setUint8(dataOffset + i, pcm8[i]);
+        async function fetchGeminiResponse() {
+            const prompt = promptInput.value.trim();
+            if (!prompt) {
+                responseOutput.textContent = "Por favor, ingresa una pregunta o comando para comenzar.";
+                return;
             }
 
-            return new Blob([view], { type: 'audio/wav' });
-        }
-
-
-        // --- FUNCIONES DE UI Y CHAT ---
-
-        /** Inicializa el AudioContext la primera vez que se requiere. */
-        function ensureAudioContext() {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
-        }
-
-        /** Actualiza el estado de la UI (botones, indicador de carga). */
-        function setUIState(isDisabled, status = '', icon = '', showDots = true) {
-            userInput.disabled = isDisabled;
-            sendButton.disabled = isDisabled;
-            micButton.disabled = isDisabled;
-
-            if (status) {
-                statusIndicator.classList.remove('hidden');
-                statusText.textContent = status;
-                statusIcon.className = `text-teal-500 ${icon}`;
-                loadingDots.classList.toggle('hidden', !showDots);
-            } else {
-                statusIndicator.classList.add('hidden');
-            }
-        }
-
-        /**
-         * Añade un nuevo mensaje a la ventana de chat.
-         * @param {string} text - El contenido del mensaje.
-         * @param {string} sender - 'user', 'assistant' o 'error'.
-         */
-        function updateChat(text, sender) {
-            const messageContainer = document.createElement('div');
-            messageContainer.className = sender === 'user' ? 'flex justify-end' : 'flex justify-start';
-
-            const messageBubble = document.createElement('div');
-            
-            if (sender === 'user') {
-                messageBubble.className = 'user-bubble';
-            } else if (sender === 'assistant') {
-                messageBubble.className = 'assistant-bubble relative';
-            } else if (sender === 'error') {
-                 messageBubble.className = 'error-bubble relative';
-            }
-
-            // Conversión básica de Markdown a HTML (negrita y saltos de línea)
-            let htmlText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-            htmlText = htmlText.replace(/\n/g, '<br>');
-
-            messageBubble.innerHTML = htmlText;
-
-            // Añadir icono de audio para el asistente si no es un error
-            if (sender === 'assistant') {
-                const audioIcon = document.createElement('i');
-                audioIcon.className = 'fas fa-volume-up text-teal-700 ml-2 cursor-pointer transition duration-150 hover:text-teal-900 absolute -right-6 top-1';
-                audioIcon.title = 'Escuchar respuesta';
-                audioIcon.onclick = () => speakResponse(text);
-                messageBubble.appendChild(audioIcon);
-            }
-
-            messageContainer.appendChild(messageBubble);
-            chatWindow.appendChild(messageContainer);
-
-            // Desplazarse al último mensaje
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-            return messageBubble;
-        }
-
-        // --- FUNCIONES DE VOZ (TTS y STT) ---
-        
-        /** Fallback: Usa la API nativa de Síntesis de Voz del navegador. */
-        function speakFallback(text) {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel(); // Detener cualquier voz anterior
-                
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'es-ES'; // Asegurar el idioma español
-                
-                // Buscar una voz en español si es posible
-                const spanishVoice = window.speechSynthesis.getVoices().find(voice => voice.lang.startsWith('es'));
-                if (spanishVoice) {
-                    utterance.voice = spanishVoice;
-                }
-
-                window.speechSynthesis.speak(utterance);
-                
-                // Opcional: Esperar a que termine de hablar (no bloqueante)
-                utterance.onend = () => {
-                    setUIState(false);
-                };
-                utterance.onerror = (e) => {
-                    console.error("Error en TTS nativo:", e);
-                    setUIState(false);
-                };
-            } else {
-                console.error("El navegador no soporta la API nativa de Speech Synthesis. Imposible usar fallback.");
-                setUIState(false);
-            }
-        }
-
-
-        /**
-         * Llama a la API de Gemini para generar el audio TTS y lo reproduce.
-         * @param {string} text - El texto a convertir a voz.
-         */
-        async function speakResponse(text) {
-            ensureAudioContext();
-
-            setUIState(true, 'Generando voz...', 'fas fa-volume-up', true);
-
-            let audioPlayedSuccessfully = false; 
-
-            // Log de diagnóstico
-            console.log("TTS API URL utilizada para el diagnóstico de 401:", ttsApiUrl);
-
-            const ttsPayload = {
-                contents: [{ parts: [{ text: text }] }],
-                generationConfig: {
-                    responseModalities: ["AUDIO"],
-                    speechConfig: {
-                        voiceConfig: {
-                            prebuiltVoiceConfig: { voiceName: "Kore" } 
-                        }
-                    }
-                },
-                systemInstruction: {
-                    parts: [{ text: "Responde siempre en español. La voz generada debe ser en español de España (es-ES)." }]
-                }
-            };
+            // 1. UI Feedback: Deshabilitar botón y mostrar carga
+            loadingIndicator.classList.remove('hidden');
+            sendButton.disabled = true;
+            responseOutput.textContent = 'Generando...';
+            statusDisplay.textContent = 'Solicitud en curso...';
 
             try {
-                const response = await fetch(ttsApiUrl, {
+                // El cliente llama a la URL del proxy para mantener la clave API segura
+                const response = await fetch(PROXY_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(ttsPayload)
+                    body: JSON.stringify({ 
+                        prompt: prompt,
+                        // Le damos al modelo una personalidad de "Agente"
+                        systemInstruction: "Actúa como un Agente de IA amigable y conciso, utilizando lenguaje profesional y verificando los datos con las herramientas disponibles.",
+                    })
                 });
 
-                if (!response.ok) {
-                    const status = response.status;
-                    const errorText = await response.text();
-                    console.error("Respuesta de error de TTS API:", errorText);
-
-                    // Si es un error de autorización, pasamos al fallback.
-                    if (status === 401 || status === 403) {
-                        throw new Error("TTS Authorization Error (401/403)");
-                    }
-                    throw new Error(`TTS API error: ${status} ${response.statusText}`);
-                }
-                
                 const result = await response.json();
-                const part = result?.candidates?.[0]?.content?.parts?.[0];
-                const audioData = part?.inlineData?.data; 
-                const mimeType = part?.inlineData?.mimeType;
-
-                if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
-                    const match = mimeType.match(/rate=(\d+)/);
-                    const sampleRate = match ? parseInt(match[1], 10) : 24000; 
-
-                    const pcmData = base64ToArrayBuffer(audioData);
-                    const pcm16 = new Int16Array(pcmData);
-                    const wavBlob = pcmToWav(pcm16, sampleRate);
-                    const audioUrl = URL.createObjectURL(wavBlob);
-
-                    // Reproducir audio y esperar a que termine
-                    const audio = new Audio(audioUrl);
-                    
-                    await new Promise((resolve, reject) => {
-                        audio.onended = () => {
-                            URL.revokeObjectURL(audioUrl);
-                            audioPlayedSuccessfully = true;
-                            resolve();
-                        };
-                        audio.onerror = (e) => {
-                            URL.revokeObjectURL(audioUrl);
-                            reject(new Error("Error de reproducción de audio."));
-                        };
-                        audio.play().catch(e => reject(new Error(`Error al iniciar la reproducción: ${e.message}`)));
-                    });
-                    
-                } else {
-                    throw new Error("Respuesta de audio TTS incompleta o formato incorrecto.");
-                }
-
-            } catch (error) {
-                console.error("Error al generar o reproducir TTS:", error);
-                
-                if (error.message.includes("401") || error.message.includes("403") || error.message.includes("Authorization Error")) {
-                    // Si falla por autorización, usamos el fallback
-                    updateChat("Fallo de Autorización (401/403) para el servicio de voz de Gemini. Usando la voz nativa del navegador como alternativa.", 'error');
-                    speakFallback(text);
-                    audioPlayedSuccessfully = true; // Considerar el fallback como éxito para no restablecer UI dos veces
-                } else {
-                    // Otros errores (red, formato, etc.)
-                    updateChat("No se pudo generar la voz. Revisa la consola para más detalles.", 'error');
-                }
-            } finally {
-                // Restablecer el estado SOLO si el audio no se reprodujo/inició con éxito (ni API ni Fallback)
-                if (!audioPlayedSuccessfully) {
-                    setUIState(false);
-                }
-            }
-        }
-
-        /** Inicia o detiene el reconocimiento de voz. */
-        function toggleSpeechInput() {
-            if (!('webkitSpeechRecognition' in window)) {
-                updateChat("Tu navegador no soporta el reconocimiento de voz. Usa la entrada de texto.", 'error');
-                return;
-            }
-
-            if (!recognition) {
-                recognition = new webkitSpeechRecognition();
-                recognition.continuous = false;
-                recognition.lang = 'es-ES'; // Configurar idioma español
-                recognition.interimResults = false;
-            }
-
-            if (isListening) {
-                recognition.stop();
-                setUIState(false);
-                micButton.classList.remove('is-listening', 'bg-red-700');
-                micButton.classList.add('bg-red-500');
-                isListening = false;
-                return;
-            }
-            
-            // Iniciar escucha
-            recognition.start();
-            isListening = true;
-            micButton.classList.add('is-listening', 'bg-red-700');
-            micButton.classList.remove('bg-red-500');
-            setUIState(true, 'Escuchando... Di algo.', 'fas fa-microphone', false);
-            userInput.value = ''; // Limpiar entrada mientras escucha
-
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                userInput.value = transcript;
-            };
-            
-            // Cuando deja de escuchar (ya sea por tiempo o por el usuario)
-            recognition.onend = () => {
-                if (isListening) {
-                    isListening = false;
-                    micButton.classList.remove('is-listening', 'bg-red-700');
-                    micButton.classList.add('bg-red-500');
-                    setUIState(false);
-                    if (userInput.value.trim()) {
-                        handleQuery();
-                    }
-                }
-            };
-
-            recognition.onerror = (event) => {
-                console.error('Error de reconocimiento de voz:', event.error);
-                recognition.stop();
-                micButton.classList.remove('is-listening', 'bg-red-700');
-                micButton.classList.add('bg-red-500');
-                updateChat(`Error en la entrada de voz: ${event.error}.`, 'error');
-            };
-        }
-
-
-        // --- FUNCIONES DE API Y LÓGICA PRINCIPAL ---
-
-        /**
-         * Llama a la API de Gemini con retroceso exponencial.
-         * @param {string} userQuery - El prompt del usuario.
-         * @param {number} attempt - Intento de reintento actual.
-         * @returns {Promise<Object>} El objeto de resultado de la respuesta de la API.
-         */
-        async function fetchWithBackoff(userQuery, attempt = 0) {
-            const MAX_RETRIES = 5;
-            const BASE_DELAY = 1000; // 1 second
-
-            const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
-                // Habilitar Google Search para respuestas fundamentadas
-                tools: [{ "google_search": {} }],
-                systemInstruction: {
-                    parts: [{ text: "Actúa como un asistente profesional y conciso. Responde a las preguntas en español. Siempre utiliza la información más reciente de Google Search para fundamentar tus respuestas." }]
-                },
-            };
-            
-            // Diagnóstico para Vercel o entornos externos
-            if (!apiKey) {
-                 console.warn("ADVERTENCIA: La clave de API está vacía. Si no estás en el entorno Canvas, la llamada fallará por 403.");
-            }
-
-            try {
-                const response = await fetch(geminiApiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
-                    const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 500;
-                    // No loguear reintentos como errores
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    return fetchWithBackoff(userQuery, attempt + 1);
-                }
 
                 if (!response.ok) {
-                    const errorDetails = await response.text();
-                    const statusText = response.statusText || 'Error desconocido';
-                    console.error("Respuesta de error completa de la API:", errorDetails);
-                    
-                    // Error específico para clave de API vacía
-                    if (!apiKey && (response.status === 403 || response.status === 400)) {
-                         throw new Error(`Error ${response.status}: Clave de API Faltante. Esta aplicación requiere que la variable 'apiKey' contenga una clave válida para funcionar. Revísala.`);
-                    }
-
-                    throw new Error(`Error ${response.status} (${statusText}): No se pudo obtener la respuesta. Detalles: ${errorDetails.substring(0, 100)}...`);
+                    // Manejar errores devueltos por la función proxy
+                    statusDisplay.textContent = 'Error';
+                    responseOutput.textContent = `[ERROR del Servidor Proxy]\nDetalles: ${JSON.stringify(result.details || result, null, 2)}`;
+                    return;
                 }
 
-                return await response.json();
-
-            } catch (error) {
-                if (attempt < MAX_RETRIES) {
-                    throw error;
-                }
-                console.error("Error final después de múltiples reintentos:", error);
-                throw new Error(`Lo siento, no pude comunicarme con el servidor después de ${MAX_RETRIES} intentos. Por favor, revisa tu conexión o intenta presionar 'Preview' de nuevo.`);
-            }
-        }
-
-        /** Main handler for user queries. */
-        async function handleQuery() {
-            const prompt = userInput.value.trim();
-            if (!prompt) return;
-
-            // 1. Limpiar entrada y deshabilitar UI
-            userInput.value = '';
-            setUIState(true, 'Generando respuesta...', 'fas fa-brain', true);
-
-            // 2. Añadir mensaje del usuario al chat
-            updateChat(prompt, 'user');
-
-            try {
-                // 3. Llamar a la API de Gemini
-                const result = await fetchWithBackoff(prompt);
-                const candidate = result.candidates?.[0];
-
-                let assistantResponse = "Lo siento, hubo un problema al generar la respuesta. La estructura de la respuesta de la API no fue la esperada.";
-
-                if (candidate && candidate.content?.parts?.[0]?.text) {
-                    assistantResponse = candidate.content.parts[0].text;
-                } else if (result.error) {
-                    assistantResponse = `Error de API: ${result.error.message}`;
-                    console.error("Error de la API en el resultado:", result.error);
-                }
-
-                // 4. Añadir respuesta del asistente al chat
-                updateChat(assistantResponse, 'assistant');
+                // 2. Procesar la respuesta exitosa
+                statusDisplay.textContent = 'Completo';
+                const candidate = result.candidates[0];
+                const generatedText = candidate.content.parts[0].text;
                 
-                // 5. Generar y reproducir voz (TTS). El restablecimiento de UI está en speakResponse.
-                await speakResponse(assistantResponse);
+                // 3. Extraer y formatear fuentes (grounding attributions)
+                let sourcesText = '';
+                const groundingMetadata = candidate.groundingMetadata;
+
+                if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                    sourcesText = '\n\n---\n🌐 Fuentes consultadas:\n';
+                    groundingMetadata.groundingAttributions.forEach((attr, index) => {
+                        if (attr.web && attr.web.uri) {
+                            sourcesText += `[${index + 1}] ${attr.web.title || 'Enlace sin título'}: ${attr.web.uri}\n`;
+                        }
+                    });
+                }
+                
+                responseOutput.textContent = generatedText + sourcesText;
 
             } catch (error) {
-                // 6. Manejar errores críticos
-                const errorMessage = error.message.includes("Clave de API Faltante")
-                    ? `**Error Crítico (Vercel):** ${error.message}`
-                    : error.message || "Ocurrió un error desconocido. Por favor, revisa la consola para más detalles.";
-                    
-                updateChat(`**¡Falló la Conexión!** ${errorMessage}`, 'error');
-                console.error("Error crítico en handleQuery:", error);
-                setUIState(false); // Asegurar que la UI se restablezca
+                // Manejar errores de red o del cliente
+                console.error('Error de conexión en el cliente:', error);
+                statusDisplay.textContent = 'Error de Conexión';
+                responseOutput.textContent = 'Ocurrió un error de red. Verifica que la función proxy esté desplegada y accesible en ' + PROXY_URL;
+            } finally {
+                // 4. Restaurar la UI
+                loadingIndicator.classList.add('hidden');
+                sendButton.disabled = false;
             }
         }
 
-        // Focus on input when the page loads
-        window.onload = () => {
-            userInput.focus();
-        };
-
+        sendButton.addEventListener('click', fetchGeminiResponse);
     </script>
 </body>
 </html>
