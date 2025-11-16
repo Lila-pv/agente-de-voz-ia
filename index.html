@@ -292,8 +292,10 @@
 
             setUIState(true, 'Generando voz...', 'fas fa-volume-up', true);
 
-            // Declaramos audioData fuera del bloque try para que sea accesible en finally.
-            let audioData = null;
+            let audioPlayedSuccessfully = false; 
+
+            // Log de diagnóstico
+            console.log("TTS API URL utilizada:", ttsApiUrl);
 
             const ttsPayload = {
                 contents: [{ parts: [{ text: text }] }],
@@ -305,7 +307,6 @@
                         }
                     }
                 },
-                // Se especifica el idioma en el prompt aunque el modelo lo detecta automáticamente.
                 systemInstruction: {
                     parts: [{ text: "Responde siempre en español. La voz generada debe ser en español de España (es-ES)." }]
                 }
@@ -319,12 +320,15 @@
                 });
 
                 if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error("Respuesta de error de TTS API:", errorText);
+                    // Lanza un error con el código de estado para un manejo más fácil
                     throw new Error(`TTS API error: ${response.status} ${response.statusText}`);
                 }
                 
                 const result = await response.json();
                 const part = result?.candidates?.[0]?.content?.parts?.[0];
-                audioData = part?.inlineData?.data; // Asignación aquí
+                const audioData = part?.inlineData?.data; 
                 const mimeType = part?.inlineData?.mimeType;
 
                 if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
@@ -336,14 +340,21 @@
                     const wavBlob = pcmToWav(pcm16, sampleRate);
                     const audioUrl = URL.createObjectURL(wavBlob);
 
-                    // Reproducir audio
+                    // Reproducir audio y esperar a que termine
                     const audio = new Audio(audioUrl);
-                    audio.play().catch(e => console.error("Error de reproducción de audio:", e));
                     
-                    audio.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
-                        setUIState(false);
-                    };
+                    await new Promise((resolve, reject) => {
+                        audio.onended = () => {
+                            URL.revokeObjectURL(audioUrl);
+                            audioPlayedSuccessfully = true;
+                            resolve();
+                        };
+                        audio.onerror = (e) => {
+                            URL.revokeObjectURL(audioUrl);
+                            reject(new Error("Error de reproducción de audio."));
+                        };
+                        audio.play().catch(e => reject(new Error(`Error al iniciar la reproducción: ${e.message}`)));
+                    });
 
                 } else {
                     throw new Error("Respuesta de audio TTS incompleta o formato incorrecto.");
@@ -351,12 +362,20 @@
 
             } catch (error) {
                 console.error("Error al generar o reproducir TTS:", error);
-                updateChat("No se pudo generar la voz. Verifica la consola para más detalles.", 'error');
-                // No llamamos a setUIState(false) aquí, lo dejamos al finally.
+                
+                let ttsErrorMessage;
+                if (error.message.includes("401") || error.message.includes("403")) {
+                    ttsErrorMessage = "La función de voz requiere permisos de API adicionales. Parece que el entorno está bloqueando la conexión (código 401/403). Presiona 'Preview' de nuevo.";
+                } else if (error.message.includes("TTS API error")) {
+                    ttsErrorMessage = `Fallo de conexión en la API de Voz: ${error.message}.`;
+                } else {
+                    ttsErrorMessage = "No se pudo generar la voz. Revisa la consola para más detalles.";
+                }
+                
+                updateChat(ttsErrorMessage, 'error');
             } finally {
-                // Si audioData es null, significa que hubo un error en la generación (catch fue llamado) 
-                // o la respuesta fue malformada, y debemos restablecer el estado de la UI.
-                if (!audioData) {
+                // Restablecer el estado A MENOS que se haya reproducido con éxito
+                if (!audioPlayedSuccessfully) {
                     setUIState(false);
                 }
             }
@@ -451,13 +470,12 @@
 
                 if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
                     const delay = BASE_DELAY * Math.pow(2, attempt) + Math.random() * 500;
-                    console.warn(`Intento ${attempt + 1}: Error ${response.status}. Reintentando en ${delay.toFixed(0)}ms...`);
+                    // No loguear reintentos como errores
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchWithBackoff(userQuery, attempt + 1);
                 }
 
                 if (!response.ok) {
-                    // Intentar leer el cuerpo del error si es posible
                     const errorDetails = await response.text();
                     const statusText = response.statusText || 'Error desconocido';
                     console.error("Respuesta de error completa de la API:", errorDetails);
@@ -468,7 +486,6 @@
 
             } catch (error) {
                 if (attempt < MAX_RETRIES) {
-                    // El reintento ocurrirá dentro de la recursión si es un error temporal (429/5xx)
                     throw error;
                 }
                 console.error("Error final después de múltiples reintentos:", error);
@@ -505,13 +522,13 @@
                 // 4. Añadir respuesta del asistente al chat
                 updateChat(assistantResponse, 'assistant');
                 
-                // 5. Generar y reproducir voz (TTS)
+                // 5. Generar y reproducir voz (TTS). El restablecimiento de UI está en speakResponse.
                 await speakResponse(assistantResponse);
 
             } catch (error) {
                 // 6. Manejar errores críticos
-                const errorMessage = error.message.includes("403") 
-                    ? `Error de Conexión (403/Forbidden): El entorno de ejecución está bloqueando la comunicación. Por favor, presiona 'Preview' o intenta reiniciar el Canvas.`
+                const errorMessage = error.message.includes("401") || error.message.includes("403") 
+                    ? `Error de Conexión (401/403): Fallo de autorización. Por favor, presiona 'Preview' o intenta reiniciar el Canvas.`
                     : error.message || "Ocurrió un error desconocido. Por favor, revisa la consola para más detalles.";
                     
                 updateChat(`**¡Falló la Conexión!** ${errorMessage}`, 'error');
